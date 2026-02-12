@@ -1,4 +1,9 @@
 #pragma once
 
-#include "units/math.h"
-#include ""
+class Stepper {
+    public:
+    Stepper();
+
+    void moveSteps(int steps, double steps_per_second);
+
+}

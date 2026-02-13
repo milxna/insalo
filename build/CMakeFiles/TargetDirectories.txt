@@ -1,0 +1,3 @@
+/Users/milanakumykova/insaloSAT/build/CMakeFiles/insaloSAT.dir
+/Users/milanakumykova/insaloSAT/build/CMakeFiles/edit_cache.dir
+/Users/milanakumykova/insaloSAT/build/CMakeFiles/rebuild_cache.dir

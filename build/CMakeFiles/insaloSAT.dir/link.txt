@@ -1,0 +1,2 @@
+/usr/bin/ar qc libinsaloSAT.a CMakeFiles/insaloSAT.dir/src/cpp/subsystems/Controller.cpp.o CMakeFiles/insaloSAT.dir/src/cpp/subsystems/Stepper.cpp.o
+/usr/bin/ranlib libinsaloSAT.a

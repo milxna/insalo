@@ -1,19 +1,21 @@
 #pragma once
 
-#include "Units.h"
-
-using namespace units::literal;
+#include "constants/Units.h"
 
 class PumpController {
-    public:
+public:
     PumpController(double syringeArea,
-                   double leadScrewPitch, //pitch is the converter between rotational and linear movement 
+                   double leadScrewPitch,
                    int stepsPerRevolution,
                    int microstepping);
 
-    void deliver(milliliter_t volume,
-                second_t time);
+    void deliver(milliliter_t volume, second_t time);
 
-    private:
-    double volumeToSteps(milliliter_t volume);
+private:
+    double volumeToSteps(milliliter_t volume) const;
+
+    double syringeArea_;
+    double leadScrewPitch_;
+    int stepsPerRevolution_;
+    int microstepping_;
 };

@@ -1,0 +1,20 @@
+Inputs: BGL (simulated), exercise levels, stress levels, menstrual_phase
+
+if CGM_simulated_data == unavailable:
+    set basal_rate = safe_mode_value
+    RETURN
+
+calculate insulin_adjustment based on:
+    CGM_simulated_data
+    exercise levels
+    stress levels
+    menstrual phase 
+
+if insulin_adjustment > max_delivery_limit:
+    limit to max_delivery_limit
+
+    output insulin_dose to delivery system
+
+
+
+    

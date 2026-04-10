@@ -13,16 +13,16 @@ def process_medtronic_data(filename):
         print(f"Error: {filename} not found.")
         return
 
-    # 1. Load data
+    #load data
     df = pd.read_csv(input_file, skiprows=6, low_memory=False)
 
-    # 2. Clean Timestamps (The fix for your error)
+    #clean timestamps
     df['Timestamp'] = pd.to_datetime(df['Date'] + ' ' + df['Time'], errors='coerce')
-    df = df.dropna(subset=['Timestamp']) # Remove the rows causing the crash
+    df = df.dropna(subset=['Timestamp']) 
     df = df.sort_values('Timestamp')
 
-    # 3. Process Values
-    # Convert to numeric, turn errors to NaN, then fill/interpolate
+    #process values 
+    #convert to numeric, handle errors, and interpolate missing glucose values
     df['SG'] = pd.to_numeric(df['Sensor Glucose (mmol/L)'], errors='coerce')
     df['SG'] = df['SG'].interpolate(method='linear') 
 
@@ -30,12 +30,12 @@ def process_medtronic_data(filename):
     df['Carbs'] = pd.to_numeric(df['BWZ Carb Input (grams)'], errors='coerce').fillna(0)
     df['Basal'] = pd.to_numeric(df['Basal Rate (U/h)'], errors='coerce').ffill().fillna(0)
 
-    # 4. Cycle Phase Logic
-    cycle_start_date = pd.to_datetime('2026-02-13') 
+    #insert cycle phase stuffz
+    cycle_start_date = pd.to_datetime('2026-03-28') 
     df['Days_Into_Cycle'] = (df['Timestamp'] - cycle_start_date).dt.days % 28 + 1
     df['Phase'] = df['Days_Into_Cycle'].apply(lambda x: 'Follicular' if x <= 14 else 'Luteal')
 
-    # 5. Export
+    #push to cleaned csv 
     final_columns = ['Timestamp', 'SG', 'Bolus', 'Carbs', 'Basal', 'Days_Into_Cycle', 'Phase']
     df_final = df[final_columns].dropna(subset=['SG'])
 
@@ -44,4 +44,4 @@ def process_medtronic_data(filename):
     print(f"Success! Cleaned {len(df_final)} rows of glucose data.")
 
 if __name__ == '__main__':
-    process_medtronic_data('Milana Kumykova 26-02-2026.csv')
+    process_medtronic_data('Milana Kumykova 28-03-2026.csv')

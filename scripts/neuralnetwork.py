@@ -4,10 +4,7 @@ import csv
 import os
 
 
-# =============================================================================
 # CONSTANTS
-# =============================================================================
-
 TARGET_BGL    = 6.1    # mmol/L 
 SAFE_BASAL    = 1.5    # U/h    - AS PER CRITERION 2
 DEFAULT_BASAL = 3.0    # U/h    
@@ -17,9 +14,7 @@ CGM_VALID_MIN = 4.0    # mmol/L
 CGM_VALID_MAX = 22.0   # mmol/L 
 
 
-# =============================================================================
 # PHYSIOLOGICAL FACTORS
-# =============================================================================
 
 CYCLE_MULTIPLIERS = {
     "follicular": 1.0,   
@@ -42,20 +37,18 @@ STRESS_MULTIPLIERS = {
 }
 
 
-# =============================================================================
 # FEATURE ENCODING
-# =============================================================================
 
-def encode(bgl, bgl_trend, exercise, stress, cycle_phase,
-           carbs_g=0, hours_since_bolus=4.0):
+def encode(bgl, bglTrend, exercise, stress, cyclePhase,
+           carbs_g=0, hoursSinceBolus=4.0):
     
     bgl_error  = bgl - TARGET_BGL                          # how far from target ??? 
     exercise_f = EXERCISE_MULTIPLIERS.get(exercise, 1.0)
     stress_f   = STRESS_MULTIPLIERS.get(stress, 1.0)
-    cycle_f    = CYCLE_MULTIPLIERS.get(cycle_phase, 1.0)
-    iob        = max(0.0, 1.0 - hours_since_bolus / 4.0)  
+    cycle_f    = CYCLE_MULTIPLIERS.get(cyclePhase, 1.0)
+    iob        = max(0.0, 1.0 - hoursSinceBolus / 4.0)  
 
-    return [bgl, bgl_error, bgl_trend, exercise_f, stress_f,
+    return [bgl, bgl_error, bglTrend, exercise_f, stress_f,
             cycle_f, carbs_g, iob]
 
 FEATURE_NAMES = [
@@ -72,43 +65,35 @@ FEATURE_NAMES = [
 N_FEATURES = len(FEATURE_NAMES)
 
 
-# =============================================================================
-# NORMALISATION
-# =============================================================================
+# NORMALISATION - make everything scaled to the same value for what it is. (see folio for explanation)
 
-FEATURE_MINS = [2.0,   -7.0,  -3.0,  0.65,  1.00,  0.90,  0.0,   0.0]
-FEATURE_MAXS = [25.0,  12.0,   3.0,  1.00,  1.30,  1.20,  60.0,  1.0]
+featureMins = [2.0,   -7.0,  -3.0,  0.65,  1.00,  0.90,  0.0,   0.0]
+featureMaxs = [25.0,  12.0,   3.0,  1.00,  1.30,  1.20,  60.0,  1.0]
 
 def normalise(features):
-    """Scale each feature to [0, 1] so no single feature dominates training."""
     result = []
-    for val, lo, hi in zip(features, FEATURE_MINS, FEATURE_MAXS):
+    for val, lo, hi in zip(features, featureMins, featureMaxs):
         span = hi - lo
         result.append((val - lo) / span if span > 0 else 0.0)
     return result
 
-def normalise_target(basal):
-    """Scale the target (basal rate) to [0, 1] for the output neuron."""
+def normaliseTarget(basal):
     return (basal - MIN_BASAL) / (MAX_BASAL - MIN_BASAL)
 
-def denormalise_target(norm_basal):
-    """Convert the network's [0, 1] output back to a real basal rate."""
+def denormaliseTarget(norm_basal):
     return norm_basal * (MAX_BASAL - MIN_BASAL) + MIN_BASAL
 
 
-# =============================================================================
-# ACTIVATION FUNCTIONS
+# DEFINE ACTIVATION FUNCTIONS
 # 1. ReLU - Rectified Linear Unit (the most common activation in neural networks)
 # Basically: "if the signal is positive, pass it through; if negative, block it."
-#
 # 2. Sigmoid - used for the output layer, squashing the output from [0,1] 
 # Formula: sigmoid(x) = 1 / (1 + e^(-x))
-# =============================================================================
 
 def relu(x):
     return max(0.0, x)
 
-def relu_derivative(x):
+def reluDerivative(x):
     # Derivative of ReLU — needed for backpropagation. 1 if x>0, else 0.
     return 1.0 if x > 0 else 0.0
 
@@ -117,12 +102,11 @@ def sigmoid(x):
     x = max(-500.0, min(500.0, x))
     return 1.0 / (1.0 + math.exp(-x))
 
-def sigmoid_derivative(sig_x):
+def sigmoidDerivative(sig_x):
     # Derivative of sigmoid given the already-computed sigmoid value.
     return sig_x * (1.0 - sig_x)
 
 
-# =============================================================================
 # THE NEURAL NETWORK
 # Architecture: 8 inputs -> 16 neurons -> 8 neurons -> 1 output
 #
@@ -134,25 +118,23 @@ def sigmoid_derivative(sig_x):
 #
 # Each neuron has a weight and bias, which are adjusted during training to minimise the error between
 # the predicted basal rate and the true basal rate (from our synthetic data).
-# =============================================================================
 
 class NeuralNetwork:
 
-    def __init__(self, layer_sizes=(N_FEATURES, 16, 8, 1), learning_rate=0.01):
-        self.lr = learning_rate
-        self.layer_sizes = layer_sizes
+    def __init__(self, layerSizes=(N_FEATURES, 16, 8, 1), learningRate=0.01):
+        self.lr = learningRate
+        self.layer_sizes = layerSizes
 
         # weights[i] is a 2D list: weights[i][j][k] is the weight from
         # neuron k in layer i to neuron j in layer i+1
         self.weights = []
         self.biases  = []
 
-        for i in range(len(layer_sizes) - 1):
-            n_in  = layer_sizes[i]
-            n_out = layer_sizes[i + 1]
+        for i in range(len(layerSizes) - 1):
+            n_in  = layerSizes[i]
+            n_out = layerSizes[i + 1]
 
             # "He initialisation": scale random weights by sqrt(2/n_in)
-            # This keeps activations from exploding or vanishing at the start
             scale = math.sqrt(2.0 / n_in)
             layer_w = [[random.gauss(0, scale) for _ in range(n_in)]
                        for _ in range(n_out)]
@@ -161,8 +143,9 @@ class NeuralNetwork:
             self.weights.append(layer_w)
             self.biases.append(layer_b)
 
+# Forward Pass
     def forward(self, x):
-        activations     = [x]   # layer 0 = the raw input
+        activations     = [x]   
         pre_activations = []
 
         for i, (W, b) in enumerate(zip(self.weights, self.biases)):
@@ -171,7 +154,6 @@ class NeuralNetwork:
                  for j in range(len(W))]
             pre_activations.append(z)
 
-            # Last layer uses sigmoid; all hidden layers use ReLU
             is_last = (i == len(self.weights) - 1)
             if is_last:
                 a = [sigmoid(zi) for zi in z]
@@ -182,25 +164,23 @@ class NeuralNetwork:
 
         return activations, pre_activations
 
-    def predict_one(self, x):
-        """Predict a single normalised basal rate for one input."""
+    def predictOne(self, x):
         activations, _ = self.forward(x)
-        return activations[-1][0]   # single output neuron
+        return activations[-1][0]   
 
     def predict(self, X):
-        """Predict for a list of inputs."""
-        return [self.predict_one(x) for x in X]
+        return [self.predictOne(x) for x in X]
 
-    # ---- Backpropagation ----------------------------------------------------
+# Backpropagation
 
-    def train_one(self, x, y_true):
+    def trainOne(self, x, y_true):
         
         activations, pre_activations = self.forward(x)
         prediction = activations[-1][0]
 
         # output layer error
         output_error = 2.0 * (prediction - y_true)
-        sig_deriv    = sigmoid_derivative(prediction)
+        sig_deriv    = sigmoidDerivative(prediction)
         deltas = [[output_error * sig_deriv]]   # delta for output layer
 
         # backpropagate through hidden layers 
@@ -209,18 +189,15 @@ class NeuralNetwork:
             d_next   = deltas[0]             # deltas from the layer ahead
             z_curr   = pre_activations[i]    # pre-activation values at this layer
 
-            # For each neuron in this layer: sum up how much it contributed
-            # to all errors in the next layer, then scale by activation derivative
             d_curr = []
             for j in range(len(z_curr)):
-                # Sum of (delta_k * weight_k_j) for all neurons k in next layer
                 upstream = sum(d_next[k] * W_next[k][j]
                                for k in range(len(d_next)))
-                d_curr.append(upstream * relu_derivative(z_curr[j]))
+                d_curr.append(upstream * reluDerivative(z_curr[j]))
 
             deltas.insert(0, d_curr)   # prepend so deltas[0] = first hidden layer
 
-        # ---- Step 3: update weights and biases with gradient descent ---------
+        # update weights and biases
         for i in range(len(self.weights)):
             prev_activations = activations[i]
             for j in range(len(self.weights[i])):
@@ -247,7 +224,7 @@ class NeuralNetwork:
 
             total_loss = 0.0
             for i in indices:
-                loss = self.train_one(X[i], y[i])
+                loss = self.trainOne(X[i], y[i])
                 total_loss += loss
 
             avg_loss = total_loss / n
@@ -277,8 +254,8 @@ class NeuralNetwork:
         preds   = self.predict(X)
         correct = 0
         for p, t in zip(preds, y_norm):
-            p_real = denormalise_target(p)
-            t_real = denormalise_target(t)
+            p_real = denormaliseTarget(p)
+            t_real = denormaliseTarget(t)
             if abs(p_real - t_real) <= tolerance_units:
                 correct += 1
         return 100.0 * correct / len(y_norm)
@@ -328,7 +305,7 @@ def generate_training_data(n=2000, seed=42):
         basal = max(MIN_BASAL, min(basal, MAX_BASAL))
 
         X.append(norm_feats)
-        y.append(normalise_target(basal))
+        y.append(normaliseTarget(basal))
 
     return X, y
 
@@ -383,8 +360,8 @@ class INSALOController:
     """
 
     def __init__(self):
-        self.net     = NeuralNetwork(layer_sizes=(N_FEATURES, 16, 8, 1),
-                                     learning_rate=0.01)
+        self.net     = NeuralNetwork(layerSizes=(N_FEATURES, 16, 8, 1),
+                                     learningRate=0.01)
         self.trained = False
 
     def train(self, csv_path=None, n_synthetic=2000, epochs=300,
@@ -424,7 +401,7 @@ class INSALOController:
                              + 0.01 * carbs)
                     basal = max(MIN_BASAL, min(basal, MAX_BASAL))
                     X.append(norm_f)
-                    y.append(normalise_target(basal))
+                    y.append(normaliseTarget(basal))
             else:
                 X, y = generate_training_data(n_synthetic, seed)
         else:
@@ -474,8 +451,8 @@ class INSALOController:
         features  = encode(bgl, bgl_trend, exercise, stress, cycle_phase,
                            carbs_g, hours_since_bolus)
         norm_f    = normalise(features)
-        norm_pred = self.net.predict_one(norm_f)
-        predicted = denormalise_target(norm_pred)
+        norm_pred = self.net.predictOne(norm_f)
+        predicted = denormaliseTarget(norm_pred)
         predicted = max(MIN_BASAL, min(predicted, MAX_BASAL))  # safety clamp
 
         bgl_status = ("HIGH"      if bgl > TARGET_BGL + 1.5 else

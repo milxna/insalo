@@ -1,30 +1,26 @@
 #pragma once
+#include <constants/Constants.h>
+#include <constants/Units.h>
 
-#include "constants/Constants.h"
-
-struct StepperConfig {
-    int stepsPerRevolution = StepperConstants::stepsPerRevolution;
-    int microstepping = StepperConstants::microstepping;
-    double leadScrewPitchMm = StepperConstants::leadScrewPitchMm;
-    double minStepsPerSecond = StepperConstants::minStepsPerSecond;
-    double maxStepsPerSecond = StepperConstants::maxStepsPerSecond;
-};
-
-class Stepper {
+class StepperMotor {
 public:
-    Stepper();
-    explicit Stepper(const StepperConfig& config);
+    StepperMotor();
+    ~StepperMotor();
 
-    void configure(const StepperConfig& config);
+    void init();
+    void enable();
+    void disable();
+    void driveFromNN(double nnOutput, int stepsToTake = -1);
+    void driveToAngle(double targetDegrees, double speedFraction = 0.5);
+    void shutdown();
 
-    void moveSteps(int steps, double steps_per_second);
-    double stepsPerMillimeter() const;
-
-    int lastCommandedSteps() const;
-    double lastCommandedSpeed() const;
+    double currentAngle() const;
+    double currentSpeed() const;
 
 private:
-    StepperConfig config_{};
-    int lastCommandedSteps_ = 0;
-    double lastCommandedSpeed_ = 0.0;
+    bool running;
+    double currentSpeed;
+    double currentAngleDeg;
 };
+
+double runNeuralNetwork(const double* inputs, int n_inputs);

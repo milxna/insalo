@@ -430,52 +430,22 @@ class INSALOController:
                               bgl, bgl_status, bgl_trend, exercise, stress, cycle_phase),
         }
 
+if __name__ == "__main__":
+    import sys
+    ctrl = INSALOController()
+    csv_path = "data/processed/cleaned_medtronic_data.csv"
+    ctrl.train(csv_path=csv_path)
 
-#  DEMO / TEST SCRIPT
+    bgl              = float(sys.argv[1])
+    bgl_trend        = float(sys.argv[2])
+    exercise         = sys.argv[3]
+    stress           = sys.argv[4]
+    cycle_phase      = sys.argv[5]
+    carbs_g          = float(sys.argv[6])
+    hours_since_bolus = float(sys.argv[7])
 
-# def run_demo():
-#     print("=" * 65)
-#     print("  INSALO - Machine Learning Base | Neural Network (MLP)")
-#     print("  VCE Systems Engineering 3&4 2026 | Milana Kumykova")
-#     print("=" * 65)
+    result = ctrl.decide(bgl, bgl_trend, exercise, stress,
+                         cycle_phase, carbs_g, hours_since_bolus)
 
-#     ctrl = INSALOController()
-
-#     csv_path = os.path.join("data", "processed", "cleaned_medtronic_data.csv")
-#     ctrl.train(csv_path=csv_path if os.path.exists(csv_path) else None)
-
-#     # ---- Evaluation Criterion 3 - Decision Accuracy -------------------------
-#     print("\n---- Evaluation Criterion 3 - Scenarios ----")
-#     scenarios = [
-#         ("High exercise",            "high",     "low",    "follicular", 0,  4, 7.0),
-#         ("Low exercise",             "light",    "low",    "follicular", 0,  4, 7.0),
-#         ("High stress",              "none",     "high",   "follicular", 0,  4, 7.0),
-#         ("Luteal phase",             "none",     "low",    "luteal",     0,  4, 7.0),
-#         ("Ovulation phase",          "none",     "low",    "ovulation",  0,  4, 7.0),
-#         ("High BGL + stress + meal", "none",     "high",   "luteal",     30, 2, 12.0),
-#         ("Low BGL + high exercise",  "high",     "low",    "menstrual",  15, 1, 4.5),
-#     ]
-#     for label, ex, st, ph, carbs, iob, bgl in scenarios:
-#         r = ctrl.decide(bgl=bgl, bgl_trend=0.0, exercise=ex, stress=st,
-#                         cycle_phase=ph, carbs_g=carbs, hours_since_bolus=iob)
-#         print("  {:<35} -> {:.3f} U/h  [{}]".format(label, r['basal_rate'], r['mode']))
-
-#     # ---- Evaluation Criterion 2 - Safe Mode ---------------------------------
-#     print("\n---- Evaluation Criterion 2 - Safe Mode ----")
-#     r1 = ctrl.decide(bgl=7.0, cgm_active=False)
-#     r2 = ctrl.decide(bgl=1.2)
-#     print("  CGM offline              -> {} U/h  [{}]".format(r1['basal_rate'], r1['mode']))
-#     print("  BGL 1.2 (out of range)   -> {} U/h  [{}]".format(r2['basal_rate'], r2['mode']))
-
-#     # ---- Evaluation Criterion 4 - Adaptive Rising BGL -----------------------
-#     print("\n---- Evaluation Criterion 4 - Rising BGL Sequence ----")
-#     for bgl_val, trend in [(7.0, 0.0), (9.5, 1.2), (12.0, 1.5), (16.5, 2.0)]:
-#         r = ctrl.decide(bgl=bgl_val, bgl_trend=trend)
-#         print("  BGL {:.1f} mmol/L, trend {:+.1f} -> {:.3f} U/h".format(
-#             bgl_val, trend, r['basal_rate']))
-
-#     print("\nDone.")
-
-
-# if __name__ == "__main__":
-#     run_demo()
+    #printing basal rate for c++
+    print(result['basal_rate'])

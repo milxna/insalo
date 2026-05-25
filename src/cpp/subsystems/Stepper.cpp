@@ -1,59 +1,149 @@
-#include "Stepper.h"
 
-#include <cmath>
-#include <stdexcept>
 
-Stepper::Stepper() = default;
-
-Stepper::Stepper(const StepperConfig& config) {
-    configure(config);
-}
-
-void Stepper::configure(const StepperConfig& config) {
-    if (config.stepsPerRevolution <= 0) {
-        throw std::invalid_argument("stepsPerRevolution must be positive");
-    }
-    if (config.microstepping <= 0) {
-        throw std::invalid_argument("microstepping must be positive");
-    }
-    if (config.leadScrewPitchMm <= 0.0) {
-        throw std::invalid_argument("leadScrewPitchMm must be positive");
-    }
-    if (config.minStepsPerSecond <= 0.0) {
-        throw std::invalid_argument("minStepsPerSecond must be positive");
-    }
-    if (config.maxStepsPerSecond < config.minStepsPerSecond) {
-        throw std::invalid_argument("maxStepsPerSecond must be >= minStepsPerSecond");
-    }
-
-    config_ = config;
-}
-
-void Stepper::moveSteps(int steps, double steps_per_second) {
-    if (steps == 0) {
-        lastCommandedSteps_ = 0;
-        lastCommandedSpeed_ = 0.0;
-        return;
-    }
-
-    const double speedMagnitude = std::abs(steps_per_second);
-    if (speedMagnitude < config_.minStepsPerSecond || speedMagnitude > config_.maxStepsPerSecond) {
-        throw std::out_of_range("steps_per_second outside configured range");
-    }
-
-    lastCommandedSteps_ = steps;
-    lastCommandedSpeed_ = steps_per_second;
-}
-
-double Stepper::stepsPerMillimeter() const {
-    return static_cast<double>(config_.stepsPerRevolution * config_.microstepping) /
-           config_.leadScrewPitchMm;
-}
-
-int Stepper::lastCommandedSteps() const {
-    return lastCommandedSteps_;
-}
-
-double Stepper::lastCommandedSpeed() const {
-    return lastCommandedSpeed_;
-}
+// #include <pigpio.h>
+// #include <iostream>
+// #include <cmath>
+// #include <algorithm>
+// #include <stdexcept>
+// #include <chrono>
+// #include <thread>
+ 
+// using namespace StepperConstants;
+  
+// StepperMotor::StepperMotor()
+//     : running(false), currentSpeed(0.0), currentAngleDeg(0.0) {}
+ 
+// StepperMotor::~StepperMotor() {
+//     shutdown();
+// }
+ 
+// // ─── Method Implementations ────────────────────────────────────────────────────
+ 
+// void StepperMotor::init() {
+//     if (gpioInitialise() < 0)
+//         throw std::runtime_error("pigpio init failed — run with sudo.");
+ 
+//     for (int pin : {PIN_STEP, PIN_DIR, PIN_EN, PIN_MS1, PIN_MS2, PIN_MS3})
+//         gpioSetMode(pin, PI_OUTPUT);
+ 
+//     // 1/16 microstepping: MS1=MS2=MS3=HIGH (A4988)
+//     gpioWrite(PIN_MS1, 1);
+//     gpioWrite(PIN_MS2, 1);
+//     gpioWrite(PIN_MS3, 1);
+ 
+//     disable();
+//     running = true;
+//     std::cout << "[Stepper] Ready. " << microstepsPerRevolution << " µsteps/rev\n";
+// }
+ 
+// void StepperMotor::enable() {
+//     gpioWrite(PIN_EN, 0);   // LOW = motor energised (A4988)
+// }
+ 
+// void StepperMotor::disable() {
+//     gpioWrite(PIN_EN, 1);   // HIGH = motor off (A4988)
+// }
+ 
+// void StepperMotor::driveFromNN(double nnOutput, int stepsToTake) {
+//     nnOutput = std::clamp(nnOutput, -1.0, 1.0);
+ 
+//     int direction = (nnOutput >= 0.0) ? 1 : 0;
+//     gpioWrite(PIN_DIR, direction);
+//     gpioDelayMicroseconds(2);   // A4988 setup time
+ 
+//     double speed = std::abs(nnOutput) * maxSpeedMicroSteps;
+//     currentSpeed = speed;
+ 
+//     if (speed < 1.0) {
+//         std::cout << "[Stepper] NN ≈ 0 → idle\n";
+//         return;
+//     }
+ 
+//     unsigned int periodUs = static_cast<unsigned int>(1'000'000.0 / speed);
+//     unsigned int delayUs  = periodUs > stepPulseMicroseconds ? periodUs - stepPulseMicroseconds : 1;
+ 
+//     if (stepsToTake < 0) stepsToTake = microstepsPerRevolution;
+ 
+//     enable();
+//     std::cout << "[Stepper] NN=" << nnOutput
+//               << " dir=" << (direction ? "CW" : "CCW")
+//               << " speed=" << speed << " µsteps/s"
+//               << " steps=" << stepsToTake << "\n";
+ 
+//     for (int i = 0; i < stepsToTake; ++i) {
+//         gpioWrite(PIN_STEP, 1);
+//         gpioDelayMicroseconds(stepPulseMicroseconds);
+//         gpioWrite(PIN_STEP, 0);
+//         gpioDelayMicroseconds(delayUs);
+//     }
+// }
+ 
+// void StepperMotor::driveToAngle(double targetDegrees, double speedFraction) {
+//     speedFraction = std::clamp(std::abs(speedFraction), 0.01, 1.0);
+//     double delta  = targetDegrees - currentAngleDeg;
+//     int usteps    = static_cast<int>(std::round((delta / 360.0) * microstepsPerRevolution));
+ 
+//     double nnEquiv = (usteps >= 0 ? 1.0 : -1.0) * speedFraction;
+//     driveFromNN(nnEquiv, std::abs(usteps));
+//     currentAngleDeg += (usteps / static_cast<double>(microstepsPerRevolution)) * 360.0;
+// }
+ 
+// void StepperMotor::shutdown() {
+//     if (running) {
+//         disable();
+//         gpioTerminate();
+//         running = false;
+//         std::cout << "[Stepper] Shutdown.\n";
+//     }
+// }
+ 
+// double StepperMotor::currentAngle() const { return currentAngleDeg; }
+// double StepperMotor::currentSpeed() const { return currentSpeed; }
+ 
+// // ─── Neural Network — Implementation ──────────────────────────────────────────
+// // Replace this body with your actual NN inference.
+// // Must return a value in [-1.0, +1.0].
+// double runNeuralNetwork(const double* inputs, int n_inputs) {
+//     // ── INSERT YOUR NN INFERENCE HERE ──
+//     double weights[] = {0.4, -0.3, 0.6};
+//     double sum = 0.0;
+//     for (int i = 0; i < std::min(n_inputs, 3); ++i)
+//         sum += inputs[i] * weights[i];
+//     return std::tanh(sum);
+// }
+ 
+// // ─── Main ──────────────────────────────────────────────────────────────────────
+// int main() {
+//     StepperMotor motor;
+ 
+//     try {
+//         motor.init();
+ 
+//         for (int cycle = 0; cycle < 10; ++cycle) {
+//             // 1. Replace with your real sensor inputs
+//             double inputs[] = {
+//                 0.5 * std::sin(cycle * 0.5),
+//                 0.3,
+//                 -0.1 * cycle
+//             };
+ 
+//             // 2. Run NN inference
+//             double nnOutput = runNeuralNetwork(inputs, 3);
+//             std::cout << "\n[Cycle " << cycle << "] NN output: " << nnOutput << "\n";
+ 
+//             // 3. Drive motor (400 µsteps = 1/8 rev per cycle)
+//             motor.driveFromNN(nnOutput, 400);
+ 
+//             // 4. Pause before next cycle
+//             std::this_thread::sleep_for(std::chrono::milliseconds(100));
+//         }
+ 
+//     } catch (const std::exception& e) {
+//         std::cerr << "[ERROR] " << e.what() << "\n";
+//         return 1;
+//     }
+ 
+//     motor.shutdown();
+//     return 0;
+// }
+ 

@@ -181,13 +181,13 @@ class NeuralNetwork:
         # output layer error
         output_error = 2.0 * (prediction - y_true)
         sig_deriv    = sigmoidDerivative(prediction)
-        deltas = [[output_error * sig_deriv]]   # delta for output layer
+        deltas = [[output_error * sig_deriv]]   
 
         # backpropagate through hidden layers 
         for i in reversed(range(len(self.weights) - 1)):
-            W_next   = self.weights[i + 1]   # weights going forward from this layer
-            d_next   = deltas[0]             # deltas from the layer ahead
-            z_curr   = pre_activations[i]    # pre-activation values at this layer
+            W_next   = self.weights[i + 1]   
+            d_next   = deltas[0]             
+            z_curr   = pre_activations[i]    
 
             d_curr = []
             for j in range(len(z_curr)):
@@ -195,7 +195,7 @@ class NeuralNetwork:
                                for k in range(len(d_next)))
                 d_curr.append(upstream * reluDerivative(z_curr[j]))
 
-            deltas.insert(0, d_curr)   # prepend so deltas[0] = first hidden layer
+            deltas.insert(0, d_curr)   
 
         # update weights and biases
         for i in range(len(self.weights)):
@@ -209,16 +209,11 @@ class NeuralNetwork:
         # Return loss for monitoring
         return (prediction - y_true) ** 2
 
-    # ---- Training Loop -------------------------------------------------------
+# training!
 
     def fit(self, X, y, epochs=200, verbose=True):
-        """
-        Train the network over multiple passes through the data.
-        Each full pass through all training examples is called an "epoch."
-        """
         n = len(X)
         for epoch in range(epochs):
-            # Shuffle data each epoch so the network doesn't memorise order
             indices = list(range(n))
             random.shuffle(indices)
 
@@ -229,17 +224,16 @@ class NeuralNetwork:
 
             avg_loss = total_loss / n
 
-            # Print progress every 50 epochs
+            # print progress every 50 epochs
             if verbose and (epoch + 1) % 50 == 0:
                 print("  Epoch {:>3}/{}  |  avg loss: {:.6f}".format(
                     epoch + 1, epochs, avg_loss))
 
         return self
 
-    # ---- Evaluation ----------------------------------------------------------
+#self evaluation 
 
     def score_r2(self, X, y):
-        """R-squared: 1.0 = perfect predictions, 0.0 = no better than the mean."""
         preds  = self.predict(X)
         mean_y = sum(y) / len(y)
         ss_res = sum((p - t) ** 2 for p, t in zip(preds, y))
@@ -247,10 +241,6 @@ class NeuralNetwork:
         return 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
 
     def accuracy_within(self, X, y_norm, tolerance_units=0.5):
-        """
-        Evaluation Criterion 3: % of predictions within +/-tolerance U/h.
-        Converts back from normalised [0,1] to real U/h for comparison.
-        """
         preds   = self.predict(X)
         correct = 0
         for p, t in zip(preds, y_norm):
@@ -261,16 +251,10 @@ class NeuralNetwork:
         return 100.0 * correct / len(y_norm)
 
 
-# =============================================================================
-# SECTION 7 - SYNTHETIC TRAINING DATA
-#
-# The ground-truth formula encodes the clinical relationships from Criterion 1.
-# The network learns to approximate this formula purely from examples —
-# it never sees the formula itself. That's the core of machine learning.
-# =============================================================================
+# SYNTHETISE DATA 
+# because I don't have unlimited real data I need something for it to train on, so this basically generates that
 
 def generate_training_data(n=2000, seed=42):
-    """Generate n synthetic (features, basal_rate) pairs for training."""
     random.seed(seed)
     phases    = list(CYCLE_MULTIPLIERS)
     exercises = list(EXERCISE_MULTIPLIERS)
@@ -289,7 +273,6 @@ def generate_training_data(n=2000, seed=42):
         features   = encode(bgl, trend, exercise, stress, phase, carbs, iob_hours)
         norm_feats = normalise(features)
 
-        # Ground-truth clinical formula (what we're teaching the network)
         bgl_error  = bgl - TARGET_BGL
         cycle_f    = CYCLE_MULTIPLIERS[phase]
         stress_f   = STRESS_MULTIPLIERS[stress]
@@ -310,9 +293,8 @@ def generate_training_data(n=2000, seed=42):
     return X, y
 
 
-# =============================================================================
-# SECTION 8 - CSV LOADER (for your real Medtronic data)
-# =============================================================================
+# LOAD CSV 
+# the real data I've fed it
 
 def load_cgm_csv(filepath):
     """Load CGM readings from your Medtronic CSV export."""
@@ -344,20 +326,10 @@ def load_cgm_csv(filepath):
     return rows
 
 
-# =============================================================================
-# SECTION 9 - MAIN CONTROLLER
-# =============================================================================
+# CONTROLLER
 
 class INSALOController:
-    """
-    Top-level controller. Instantiate on the Raspberry Pi Zero W.
-
-    Usage:
-        ctrl = INSALOController()
-        ctrl.train()
-        result = ctrl.decide(bgl=9.5, bgl_trend=1.2, exercise='moderate',
-                             stress='high', cycle_phase='luteal')
-    """
+    #built to run on Raspberry Pi Zero W 
 
     def __init__(self):
         self.net     = NeuralNetwork(layerSizes=(N_FEATURES, 16, 8, 1),
@@ -366,13 +338,8 @@ class INSALOController:
 
     def train(self, csv_path=None, n_synthetic=2000, epochs=300,
               test_split=0.2, seed=42):
-        """
-        Train the neural network.
-        Uses real Medtronic BGL data if CSV is provided; otherwise synthetic.
-        """
-        random.seed(seed)
-        print("\n[TRAIN] Preparing data...")
 
+        random.seed(seed)
         if csv_path and os.path.exists(csv_path):
             cgm_rows = load_cgm_csv(csv_path)
             if cgm_rows:
@@ -433,11 +400,8 @@ class INSALOController:
     def decide(self, bgl, bgl_trend=0.0, exercise='none', stress='low',
                cycle_phase='follicular', carbs_g=0,
                hours_since_bolus=4.0, cgm_active=True):
-        """
-        Make one insulin delivery decision. Call every 5 minutes.
-        Returns: { 'basal_rate': float, 'mode': str, 'reason': str }
-        """
-        # Evaluation Criterion 2: Safe Mode
+
+        # safe mode !!!!!
         if not cgm_active or not (CGM_VALID_MIN <= bgl <= CGM_VALID_MAX):
             return {
                 'basal_rate': SAFE_BASAL,
@@ -467,9 +431,7 @@ class INSALOController:
         }
 
 
-# =============================================================================
 #  DEMO / TEST SCRIPT
-# =============================================================================
 
 # def run_demo():
 #     print("=" * 65)

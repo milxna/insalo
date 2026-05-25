@@ -19,7 +19,7 @@ public:
 
 private:
     bool running;
-    double currentSpeed;
+    double speed;
     double currentAngleDeg;
 };
 

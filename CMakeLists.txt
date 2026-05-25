@@ -12,4 +12,5 @@ add_library(insaloSAT
 
 target_include_directories(insaloSAT PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/include "
+    
 )

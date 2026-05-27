@@ -306,9 +306,9 @@ def load_cgm_csv(filepath):
     with open(filepath, newline='', encoding='utf-8-sig') as f:
         reader = csv.DictReader(f)
         for row in reader:
-            bgl_raw = (row.get('SGValue') or row.get('SG Value') or
-                       row.get('sg_value') or row.get('BGL') or
-                       row.get('Sensor Glucose (mmol/L)') or '')
+            bgl_raw = (row.get('SG') or row.get('SGValue') or row.get('SG Value') or
+           row.get('sg_value') or row.get('BGL') or
+           row.get('Sensor Glucose (mmol/L)') or '')
             try:
                 bgl = float(bgl_raw)
             except (ValueError, TypeError):

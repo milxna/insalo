@@ -39,9 +39,9 @@ def process_medtronic_data(filename):
     final_columns = ['Timestamp', 'SG', 'Bolus', 'Carbs', 'Basal', 'Days_Into_Cycle', 'Phase']
     df_final = df[final_columns].dropna(subset=['SG'])
 
-    output_name = "cleaned_medtronic_data.csv"
+    output_name = "cleaned_medtronic_data2.csv"
     df_final.to_csv(os.path.join(PROCESSED_PATH, output_name), index=False)
     print(f"Success! Cleaned {len(df_final)} rows of glucose data.")
 
 if __name__ == '__main__':
-    process_medtronic_data('Milana Kumykova 28-03-2026.csv')
+    process_medtronic_data('Milana Kumykova 27-05-2026.csv')

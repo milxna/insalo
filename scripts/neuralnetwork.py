@@ -254,7 +254,7 @@ class NeuralNetwork:
 # SYNTHETISE DATA 
 # because I don't have unlimited real data I need something for it to train on, so this basically generates that
 
-def generate_training_data(n=2000, seed=42):
+def generate_training_data(n=10000, seed=42):
     random.seed(seed)
     phases    = list(CYCLE_MULTIPLIERS)
     exercises = list(EXERCISE_MULTIPLIERS)

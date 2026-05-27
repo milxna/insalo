@@ -440,7 +440,7 @@ if __name__ == "__main__":
     ctrl = INSALOController()
     csv_path = "data/processed/cleaned_medtronic_data.csv"
     csv_path2 = "data/processed/cleaned_medtronic_data2.csv"
-    ctrl.train(csv_path=csv_path, csv_path2=csv_path2)
+    ctrl.train(csv_path=csv_path)
 
     bgl              = float(sys.argv[1])
     bgl_trend        = float(sys.argv[2])

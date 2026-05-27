@@ -342,6 +342,11 @@ class INSALOController:
         random.seed(seed)
         if csv_path and os.path.exists(csv_path):
             cgm_rows = load_cgm_csv(csv_path)
+            csv_path2 = os.path.join("data", "processed", "cleaned_medtronic_data2.csv")
+            if os.path.exists(csv_path2):
+                cgm_rows2 = load_cgm_csv(csv_path2)
+                cgm_rows += cgm_rows2
+
             if cgm_rows:
                 X, y = [], []
                 phases    = list(CYCLE_MULTIPLIERS)
@@ -434,7 +439,8 @@ if __name__ == "__main__":
     import sys
     ctrl = INSALOController()
     csv_path = "data/processed/cleaned_medtronic_data.csv"
-    ctrl.train(csv_path=csv_path)
+    csv_path2 = "data/processed/cleaned_medtronic_data2.csv"
+    ctrl.train(csv_path=csv_path, csv_path2=csv_path2)
 
     bgl              = float(sys.argv[1])
     bgl_trend        = float(sys.argv[2])

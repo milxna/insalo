@@ -1,12 +1,12 @@
 #include <subsystems/Stepper.h>
 
-#include <cmath>
-#include <stdexcept>
-#include <iostream>
-
 #ifdef __linux__
 #include <pigpio.h>
 #endif
+
+#include <cmath>
+#include <stdexcept>
+#include <iostream>
 
 Stepper::Stepper() = default;
 

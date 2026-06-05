@@ -4,6 +4,10 @@
 #include <stdexcept>
 #include <iostream>
 
+#ifdef __linux__
+#include <pigpio.h>
+#endif
+
 Stepper::Stepper() = default;
 
 Stepper::Stepper(const StepperConfig& config) {

@@ -1,26 +1,44 @@
 #pragma once
-#include <constants/Constants.h>
-#include <constants/Units.h>
 
-class StepperMotor {
+#include "constants/Constants.h"
+
+#ifdef __linux__
+#include <pigpio.h>
+#endif
+
+class Stepper {
 public:
-    StepperMotor();
-    ~StepperMotor();
+    Stepper();
+    explicit Stepper(const StepperConfig& config);
 
+    void configure(const StepperConfig& config);
     void init();
-    void enable();
-    void disable();
-    void driveFromNN(double nnOutput, int stepsToTake = -1);
-    void driveToAngle(double targetDegrees, double speedFraction = 0.5);
     void shutdown();
 
-    double currentAngle() const;
-    double currentSpeed() const;
+    void moveSteps(int steps, double stepsPerSecond);
+    double stepsPerMillimeter() const;
+
+    int lastCommandedSteps() const;
+    double lastCommandedSpeed() const;
 
 private:
-    bool running;
-    double speed;
-    double currentAngleDeg;
+    StepperConfig config_{};
+    int lastCommandedSteps_ = 0;
+    double lastCommandedSpeed_ = 0.0;
 };
 
-double runNeuralNetwork(const double* inputs, int n_inputs);
+
+struct StepperConfig {
+    int stepsPerRevolution  = StepperConstants::stepsPerRevolution;
+    int microstepping       = StepperConstants::microstepping;
+    double leadScrewPitchMm = StepperConstants::leadScrewPitchMm;
+    double minStepsPerSecond = StepperConstants::minStepsPerSecond;
+    double maxStepsPerSecond = StepperConstants::maxStepsPerSecond;
+
+    int pinStep = StepperConstants::PIN_STEP;
+    int pinDir  = StepperConstants::PIN_DIR;
+    int pinEn   = StepperConstants::PIN_EN;
+    int pinMs1  = StepperConstants::PIN_MS1;
+    int pinMs2  = StepperConstants::PIN_MS2;
+    int pinMs3  = StepperConstants::PIN_MS3;
+};

@@ -4,6 +4,9 @@
 
 //test code 
 int main() {
+    
+    Stepper motor;
+
     try {
         motor.init();
 

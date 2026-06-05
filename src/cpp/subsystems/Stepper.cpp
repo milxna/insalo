@@ -79,7 +79,7 @@ void Stepper::moveSteps(int steps, double stepsPerSecond) {
 
 #ifdef __linux__
     gpioWrite(config_.pinDir, steps > 0 ? 1 : 0);
-    gpioDelayMicroseconds(2);
+    gpioDelay(2);
     gpioWrite(config_.pinEn, 0);
 
     unsigned int periodUs = static_cast<unsigned int>(1'000'000.0 / speedMagnitude);
@@ -88,9 +88,9 @@ void Stepper::moveSteps(int steps, double stepsPerSecond) {
     int count = std::abs(steps);
     for (int i = 0; i < count; ++i) {
         gpioWrite(config_.pinStep, 1);
-        gpioDelayMicroseconds(5);
+        gpioDelay(5);
         gpioWrite(config_.pinStep, 0);
-        gpioDelayMicroseconds(delayUs);
+        gpioDelay(delayUs);
     }
 
     gpioWrite(config_.pinEn, 1); //disable motor after moving

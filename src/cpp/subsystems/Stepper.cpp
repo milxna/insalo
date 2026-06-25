@@ -63,6 +63,12 @@ void Stepper::shutdown() {
 }
 
 void Stepper::moveSteps(int steps, double stepsPerSecond) {
+    std::cout << "[DEBUG] moveSteps called: steps=" << steps 
+              << " speed=" << stepsPerSecond
+              << " min=" << config_.minStepsPerSecond
+              << " max=" << config_.maxStepsPerSecond << "\n";
+    std::flush(std::cout);
+
     if (steps == 0) {
         lastCommandedSteps_ = 0;
         lastCommandedSpeed_ = 0.0;
@@ -81,7 +87,9 @@ void Stepper::moveSteps(int steps, double stepsPerSecond) {
     gpioWrite(config_.pinDir, steps > 0 ? 1 : 0);
     gpioDelay(2);
     gpioWrite(config_.pinEn, 0);
-
+    std::cout << "[DEBUG] EN pulled LOW, sending " << std::abs(steps) << " pulses\n";
+    std::flush(std::cout);
+    
     unsigned int periodUs = static_cast<unsigned int>(1'000'000.0 / speedMagnitude);
     unsigned int delayUs  = periodUs > 5 ? periodUs - 5 : 1;
 

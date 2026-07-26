@@ -557,7 +557,7 @@ if __name__ == "__main__":
 
         print("\nDecision Result:")
         print(result)
-        INSALOController.sendMotorCommand(result["steps"])
+        controller.sendMotorCommand(result["steps"])
 
     else:
         print("\nRunning with default test inputs...")
@@ -572,7 +572,7 @@ if __name__ == "__main__":
         )
 
         print("Decision Result:", result)
-        INSALOController.sendMotorCommand(result["steps"])
+        controller.sendMotorCommand(result["steps"])
 
     # #printing basal rate for c++
     # print(result['basal_rate']) 

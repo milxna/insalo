@@ -562,7 +562,7 @@ if __name__ == "__main__":
     else:
         print("\nRunning with default test inputs...")
         result = controller.decide(
-            bgl=10.5,
+            bgl=18.0,
             bgl_trend=0.2,
             exercise="moderate",
             stress="low",

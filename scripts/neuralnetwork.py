@@ -4,6 +4,7 @@ import csv
 import os
 import serial
 import json
+import time
 
 # CONSTANTS
 TARGET_BGL    = 6.1    # mmol/L 
@@ -376,8 +377,17 @@ class INSALOController:
     #                                  learningRate=0.01)
     #     self.trained = False
 
-    def __init__(self):
+    def __init__(self, arduino_port="/dev/ttyACM0", baudrate=115200, connect=True):
         self.serial = None
+        if connect:
+            try:
+                self.serial = serial.Serial(arduino_port, baudrate, timeout=2)
+                time.sleep(2)  # let the Arduino reset after the serial connection opens
+                print(f"[INFO] Connected to Arduino on {arduino_port}")
+            except serial.SerialException as e:
+                print(f"[WARN] Could not connect to Arduino: {e}")
+                self.serial = None
+ 
         self.net = NeuralNetwork(
             layerSizes=(N_FEATURES, 16, 8, 1), learningRate=0.01
         )
@@ -385,12 +395,12 @@ class INSALOController:
 
     def save_model(self, filepath="insalo_weights.json"):
         if not self.trained:
-            print("[WARN] Attempting to save weights, but model is not trained yet.")
+            print("not trained")
         self.net.save_weights(filepath)
 
     def load_model(self, filepath="insalo_weights.json"):
         self.net.load_weights(filepath)
-        self.trained = True  # Mark as trained so decide() works immediately
+        self.trained = True  
 
     def train(self, csv_path=None, n_synthetic=2000, epochs=300,
               test_split=0.2, seed=42):
@@ -493,10 +503,23 @@ class INSALOController:
                             bgl, bgl_status, bgl_trend, exercise, stress, cycle_phase),
         }
 
-#test code placeholder
-def sendMotorCommand(steps):
-    print(f"Sending to Arduino: MOVE {steps}")
-
+def sendMotorCommand(self, steps):
+        if self.serial is None:
+            print(f"[SIM] Would send: MOVE {steps}")
+            return None
+ 
+        command = f"MOVE {steps}\n"
+        self.serial.write(command.encode())
+        response = self.serial.readline().decode().strip()
+ 
+        if response.startswith("OK"):
+            print(f"Confirmed: {response}")
+        elif response.startswith("ERR"):
+            print(f"Rejected by Arduino: {response}")
+        else:
+            print(f"Unexpected response: '{response}' - check connection")
+ 
+        return response
 
 if __name__ == "__main__":
     import sys
@@ -537,7 +560,7 @@ if __name__ == "__main__":
         sendMotorCommand(result["steps"])
 
     else:
-        print("\n[TEST] Running with default test inputs...")
+        print("\nRunning with default test inputs...")
         result = controller.decide(
             bgl=10.5,
             bgl_trend=0.2,

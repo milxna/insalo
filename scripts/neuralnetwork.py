@@ -503,23 +503,23 @@ class INSALOController:
                             bgl, bgl_status, bgl_trend, exercise, stress, cycle_phase),
         }
 
-def sendMotorCommand(self, steps):
-        if self.serial is None:
-            print(f"[SIM] Would send: MOVE {steps}")
-            return None
- 
-        command = f"MOVE {steps}\n"
-        self.serial.write(command.encode())
-        response = self.serial.readline().decode().strip()
- 
-        if response.startswith("OK"):
-            print(f"Confirmed: {response}")
-        elif response.startswith("ERR"):
-            print(f"Rejected by Arduino: {response}")
-        else:
-            print(f"Unexpected response: '{response}' - check connection")
- 
-        return response
+    def sendMotorCommand(self, steps):
+            if self.serial is None:
+                print(f"[SIM] Would send: MOVE {steps}")
+                return None
+    
+            command = f"MOVE {steps}\n"
+            self.serial.write(command.encode())
+            response = self.serial.readline().decode().strip()
+    
+            if response.startswith("OK"):
+                print(f"Confirmed: {response}")
+            elif response.startswith("ERR"):
+                print(f"Rejected by Arduino: {response}")
+            else:
+                print(f"Unexpected response: '{response}' - check connection")
+    
+            return response
 
 if __name__ == "__main__":
     import sys

@@ -2,7 +2,9 @@ import math
 import random
 import csv
 import os
-
+import serial
+import json
+import time
 
 # CONSTANTS
 TARGET_BGL    = 6.1    # mmol/L 
@@ -13,9 +15,15 @@ MIN_BASAL     = 0.0    # U/h
 CGM_VALID_MIN = 4.0    # mmol/L 
 CGM_VALID_MAX = 22.0   # mmol/L 
 
+# MOTOR CALIBRATION
+CONTROL_PERIOD_MIN = 5.0 / 60.0      # run every 5 mins
+STEPS_PER_REV = 200
+LEADSCREW_PITCH = 1.25     
+MM_PER_UNIT = 0.32         # fixme - calibrate 
+STEPS_PER_MM = STEPS_PER_REV / LEADSCREW_PITCH
+STEPS_PER_UNIT = MM_PER_UNIT * STEPS_PER_MM
 
 # PHYSIOLOGICAL FACTORS
-
 CYCLE_MULTIPLIERS = {
     "follicular": 1.0,   
     "ovulation":  0.95,   
@@ -83,6 +91,9 @@ def normaliseTarget(basal):
 def denormaliseTarget(norm_basal):
     return norm_basal * (MAX_BASAL - MIN_BASAL) + MIN_BASAL
 
+def basalToSteps(basalRate):
+    units = basalRate * CONTROL_PERIOD_MIN
+    return round(units * STEPS_PER_UNIT)
 
 # DEFINE ACTIVATION FUNCTIONS
 # 1. ReLU - Rectified Linear Unit (the most common activation in neural networks)
@@ -249,6 +260,30 @@ class NeuralNetwork:
             if abs(p_real - t_real) <= tolerance_units:
                 correct += 1
         return 100.0 * correct / len(y_norm)
+    
+    def save_weights(self, filepath="model_weights.json"):
+        """Saves weights, biases, and layer configuration to a JSON file."""
+        data = {
+            "layer_sizes": self.layer_sizes,
+            "weights": self.weights,
+            "biases": self.biases,
+        }
+        with open(filepath, "w") as f:
+            json.dump(data, f)
+        print(f"[INFO] Weights successfully saved to {filepath}")
+
+    def load_weights(self, filepath="model_weights.json"):
+        """Loads weights, biases, and layer configuration from a JSON file."""
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"Weight file not found: {filepath}")
+
+        with open(filepath, "r") as f:
+            data = json.load(f)
+
+        self.layer_sizes = data["layer_sizes"]
+        self.weights = data["weights"]
+        self.biases = data["biases"]
+        print(f"[INFO] Weights successfully loaded from {filepath}")
 
 
 # SYNTHETISE DATA 
@@ -297,7 +332,7 @@ def generate_training_data(n=10000, seed=42):
 # the real data I've fed it
 
 def load_cgm_csv(filepath):
-    """Load CGM readings from your Medtronic CSV export."""
+    """Load CGM readings from Medtronic CSV export."""
     if not os.path.exists(filepath):
         print("[WARN] CSV not found at: {}".format(filepath))
         return []
@@ -331,10 +366,41 @@ def load_cgm_csv(filepath):
 class INSALOController:
     #built to run on Raspberry Pi Zero W 
 
-    def __init__(self):
-        self.net     = NeuralNetwork(layerSizes=(N_FEATURES, 16, 8, 1),
-                                     learningRate=0.01)
+    #fixme
+    # def __init__(self):
+    #     # self.serial = serial.Serial(
+    #     #                 "/dev/ttyACM0", also this depends ont he port of the arduino so this is subj to change
+    #     #                 115200,
+    #     #                 timeout=1)
+    #     self.serial = None #placeholder
+    #     self.net     = NeuralNetwork(layerSizes=(N_FEATURES, 16, 8, 1),
+    #                                  learningRate=0.01)
+    #     self.trained = False
+
+    def __init__(self, arduino_port="/dev/ttyACM0", baudrate=115200, connect=True):
+        self.serial = None
+        if connect:
+            try:
+                self.serial = serial.Serial(arduino_port, baudrate, timeout=2)
+                time.sleep(2)  # let the Arduino reset after the serial connection opens
+                print(f"[INFO] Connected to Arduino on {arduino_port}")
+            except serial.SerialException as e:
+                print(f"[WARN] Could not connect to Arduino: {e}")
+                self.serial = None
+ 
+        self.net = NeuralNetwork(
+            layerSizes=(N_FEATURES, 16, 8, 1), learningRate=0.01
+        )
         self.trained = False
+
+    def save_model(self, filepath="insalo_weights.json"):
+        if not self.trained:
+            print("not trained")
+        self.net.save_weights(filepath)
+
+    def load_model(self, filepath="insalo_weights.json"):
+        self.net.load_weights(filepath)
+        self.trained = True  
 
     def train(self, csv_path=None, n_synthetic=2000, epochs=300,
               test_split=0.2, seed=42):
@@ -428,30 +494,101 @@ class INSALOController:
                       "LOW"       if bgl < TARGET_BGL - 1.0 else
                       "ON TARGET")
 
+        steps = basalToSteps(predicted)
         return {
             'basal_rate': round(predicted, 3),
+            'steps':      steps,
             'mode':       'AUTO',
             'reason':     "BGL {:.1f} ({}), trend {:+.2f}, ex={}, stress={}, phase={}".format(
-                              bgl, bgl_status, bgl_trend, exercise, stress, cycle_phase),
+                            bgl, bgl_status, bgl_trend, exercise, stress, cycle_phase),
         }
+
+    def sendMotorCommand(self, steps):
+            if self.serial is None:
+                print(f"[SIM] Would send: MOVE {steps}")
+                return None
+    
+            command = f"MOVE {steps}\n"
+            self.serial.write(command.encode())
+            response = self.serial.readline().decode().strip()
+    
+            if response.startswith("OK"):
+                print(f"Confirmed: {response}")
+            elif response.startswith("ERR"):
+                print(f"Rejected by Arduino: {response}")
+            else:
+                print(f"Unexpected response: '{response}' - check connection")
+    
+            return response
 
 if __name__ == "__main__":
     import sys
-    ctrl = INSALOController()
-    csv_path = "data/processed/cleaned_medtronic_data.csv"
-    csv_path2 = "data/processed/cleaned_medtronic_data2.csv"
-    ctrl.train(csv_path=csv_path)
 
-    bgl              = float(sys.argv[1])
-    bgl_trend        = float(sys.argv[2])
-    exercise         = sys.argv[3]
-    stress           = sys.argv[4]
-    cycle_phase      = sys.argv[5]
-    carbs_g          = float(sys.argv[6])
-    hours_since_bolus = float(sys.argv[7])
+    WEIGHTS_FILE = "insalo_weights.json"
+    controller = INSALOController()
 
-    result = ctrl.decide(bgl, bgl_trend, exercise, stress,
-                         cycle_phase, carbs_g, hours_since_bolus)
+    if os.path.exists(WEIGHTS_FILE):
+        print("[INIT] Loading pre-trained weights from file...")
+        controller.load_model(WEIGHTS_FILE)
+    else:
+        print("[INIT] No saved weights found. Training model now...")
+        csv_path = "data/processed/cleaned_medtronic_data.csv"
+        controller.train(csv_path=csv_path)
+        controller.save_model(WEIGHTS_FILE)
 
-    #printing basal rate for c++
-    print(result['basal_rate'])
+    if len(sys.argv) >= 8:
+        bgl = float(sys.argv[1])
+        bgl_trend = float(sys.argv[2])
+        exercise = sys.argv[3]
+        stress = sys.argv[4]
+        cycle_phase = sys.argv[5]
+        carbs_g = float(sys.argv[6])
+        hours_since_bolus = float(sys.argv[7])
+
+        result = controller.decide(
+            bgl,
+            bgl_trend,
+            exercise,
+            stress,
+            cycle_phase,
+            carbs_g,
+            hours_since_bolus,
+        )
+
+        print("\nDecision Result:")
+        print(result)
+        sendMotorCommand(result["steps"])
+
+    else:
+        print("\nRunning with default test inputs...")
+        result = controller.decide(
+            bgl=10.5,
+            bgl_trend=0.2,
+            exercise="moderate",
+            stress="low",
+            cycle_phase="follicular",
+            carbs_g=40,
+            hours_since_bolus=1.2,
+        )
+
+        print("Decision Result:", result)
+        sendMotorCommand(result["steps"])
+
+    # #printing basal rate for c++
+    # print(result['basal_rate']) 
+    # deprecated as no longer using c++ for the purposes of this project
+
+# def sendMotorCommand(steps):
+#     arduino = serial.Serial(
+#         "/dev/cu.usbmodemXXXX",
+#         115200,
+#         timeout=1
+#     )
+#     command = f"MOVE {steps}\n"
+#     arduino.write(command.encode())
+#     response = arduino.readline().decode().strip()
+#     print(response)
+#     arduino.close()
+
+
+

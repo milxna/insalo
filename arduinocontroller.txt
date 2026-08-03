@@ -1,0 +1,134 @@
+//this would be a C++ file but i did not want to clutter up my repository. this code lives locally in Arduion IDE
+
+const int IN1 = 8;
+const int IN2 = 9;
+const int IN3 = 10;
+const int IN4 = 11;
+
+//fixme - tuning
+const unsigned long STEP_DELAY_MS = 100;   
+const long MAX_STEPS_PER_COMMAND = 2000;   
+
+
+const float UNITS_PER_STEP = 0.05;
+
+
+long unitsToSteps(float units) {
+  return (long)round(units / UNITS_PER_STEP);
+}
+
+
+const int NUM_PHASES = 4;
+const bool STEP_SEQUENCE[NUM_PHASES][4] = {
+  {true,  false, true,  false},
+  {false, true,  true,  false},
+  {false, true,  false, true},
+  {true,  false, false, true},
+};
+
+int currentPhase = 0;
+
+void setPhase(int phase) {
+  digitalWrite(IN1, STEP_SEQUENCE[phase][0]);
+  digitalWrite(IN2, STEP_SEQUENCE[phase][1]);
+  digitalWrite(IN3, STEP_SEQUENCE[phase][2]);
+  digitalWrite(IN4, STEP_SEQUENCE[phase][3]);
+}
+
+void releaseCoils() {
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, LOW);
+}
+
+long stepMotor(long steps) {
+  int direction = (steps >= 0) ? 1 : -1;
+  long stepsToDo = abs(steps);
+  long stepsDone = 0;
+
+  for (long i = 0; i < stepsToDo; i++) {
+    currentPhase = (currentPhase - direction + NUM_PHASES) % NUM_PHASES;
+    setPhase(currentPhase);
+    delay(STEP_DELAY_MS);
+    stepsDone++;
+  }
+
+  releaseCoils();
+  return direction * stepsDone;
+}
+
+void setup() {
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+
+  releaseCoils();
+
+  Serial.begin(115200);
+  Serial.setTimeout(50);
+}
+
+void loop() {
+  if (Serial.available() > 0) {
+    String line = Serial.readStringUntil('\n');
+    line.trim();
+
+    if (line.startsWith("DOSE")) {
+      String arg = line.substring(4);
+      arg.trim();
+
+      if (arg.length() == 0) {
+        Serial.println("ERR bad_dose");
+        return;
+      }
+
+      float requestedUnits = arg.toFloat();
+      long requestedSteps = unitsToSteps(requestedUnits);
+
+      if (abs(requestedSteps) > MAX_STEPS_PER_COMMAND) {
+        Serial.println("ERR dose_out_of_range");
+        return;
+      }
+
+      long completedSteps = stepMotor(requestedSteps);
+      float unitsDelivered = completedSteps * UNITS_PER_STEP;
+
+      Serial.print("OK ");
+      Serial.println(unitsDelivered, 3);
+
+    } else if (line.startsWith("MOVE")) {
+      String arg = line.substring(4);
+      arg.trim();
+
+      // Basic validation before we let it touch the motor
+      bool isValidNumber = arg.length() > 0;
+      for (unsigned int i = 0; i < arg.length() && isValidNumber; i++) {
+        char c = arg.charAt(i);
+        if (!isDigit(c) && !(c == '-' && i == 0)) {
+          isValidNumber = false;
+        }
+      }
+
+      if (!isValidNumber) {
+        Serial.println("ERR bad_step_count");
+        return;
+      }
+
+      long requestedSteps = arg.toInt();
+
+      if (abs(requestedSteps) > MAX_STEPS_PER_COMMAND) {
+        Serial.println("ERR steps_out_of_range");
+        return;
+      }
+
+      long completed = stepMotor(requestedSteps);
+      Serial.print("OK ");
+      Serial.println(completed);
+
+    } else if (line.length() > 0) {
+      Serial.println("ERR unknown_command");
+    }
+  }
+}

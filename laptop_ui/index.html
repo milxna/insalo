@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>INSALO — Closed-Loop Demo Console</title>
+<style>
+  :root{
+    --bg: #081014;
+    --panel: #0F1B20;
+    --panel-alt: #12222A;
+    --grid: #1C2E33;
+    --trace: #4FD8C4;
+    --trace-dim: #2B6E64;
+    --amber: #F2A93B;
+    --danger: #E85C4A;
+    --text: #E7F2F0;
+    --muted: #5D7A80;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Roboto Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  *{ box-sizing: border-box; }
+  html,body{
+    margin:0; padding:0; background:var(--bg); color:var(--text);
+    font-family: var(--sans); min-height:100vh;
+  }
+  body{
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 28px 28px;
+    background-position: -1px -1px;
+  }
+  .wrap{ max-width:1280px; margin:0 auto; padding:20px 24px 48px; }
+
+  /* top bar */
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding-bottom:16px; margin-bottom:20px; border-bottom:1px solid var(--grid);
+  }
+  .brand{ display:flex; align-items:baseline; gap:12px; }
+  .brand .eyebrow{
+    font-family: var(--mono); font-size:11px; letter-spacing:.14em;
+    color:var(--muted); text-transform:uppercase;
+  }
+  .brand h1{
+    margin:0; font-size:22px; letter-spacing:.02em; font-weight:600;
+  }
+  .brand h1 span{ color:var(--trace); }
+  .conn{ display:flex; align-items:center; gap:10px; font-family:var(--mono); font-size:12px; }
+  .conn input{
+    background:var(--panel-alt); border:1px solid var(--grid); color:var(--text);
+    font-family:var(--mono); font-size:12px; padding:6px 8px; border-radius:4px; width:150px;
+  }
+  .dot{ width:8px; height:8px; border-radius:50%; background:var(--muted); flex:none; }
+  .dot.live{ background:var(--trace); box-shadow:0 0 8px var(--trace); animation:pulse 1.6s ease-in-out infinite; }
+  .dot.bad{ background:var(--danger); box-shadow:0 0 8px var(--danger); }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
+  button.small{
+    background:none; border:1px solid var(--grid); color:var(--muted);
+    font-family:var(--mono); font-size:11px; padding:5px 10px; border-radius:4px; cursor:pointer;
+  }
+  button.small:hover{ border-color:var(--trace); color:var(--trace); }
+
+  /* layout grid */
+  .grid{ display:grid; grid-template-columns: 300px 1fr 300px; gap:18px; }
+  @media (max-width: 980px){ .grid{ grid-template-columns: 1fr; } }
+
+  .panel{
+    background:var(--panel); border:1px solid var(--grid); border-radius:8px; padding:18px;
+  }
+  .panel h2{
+    margin:0 0 16px; font-family:var(--mono); font-size:11px; letter-spacing:.12em;
+    color:var(--muted); text-transform:uppercase; font-weight:600;
+  }
+
+  /* inputs */
+  .field{ margin-bottom:16px; }
+  .field label{
+    display:flex; justify-content:space-between; font-size:12px; color:var(--muted);
+    margin-bottom:6px; font-family:var(--mono);
+  }
+  .field label b{ color:var(--text); font-weight:600; }
+  input[type=range]{
+    width:100%; accent-color: var(--trace); height:4px;
+  }
+  select{
+    width:100%; background:var(--panel-alt); border:1px solid var(--grid);
+    color:var(--text); font-family:var(--sans); font-size:13px; padding:8px; border-radius:4px;
+  }
+  .toggle-row{ display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+  .toggle-row span{ font-size:12px; color:var(--muted); font-family:var(--mono); }
+  .switch{ position:relative; width:36px; height:20px; }
+  .switch input{ opacity:0; width:0; height:0; }
+  .slider-tog{
+    position:absolute; cursor:pointer; inset:0; background:var(--panel-alt);
+    border:1px solid var(--grid); border-radius:20px; transition:.15s;
+  }
+  .slider-tog:before{
+    content:""; position:absolute; height:14px; width:14px; left:2px; top:2px;
+    background:var(--muted); border-radius:50%; transition:.15s;
+  }
+  .switch input:checked + .slider-tog{ border-color:var(--trace); }
+  .switch input:checked + .slider-tog:before{ transform:translateX(16px); background:var(--trace); }
+
+  .send-btn{
+    width:100%; padding:12px; margin-top:6px; background:var(--trace); color:#04211D;
+    border:none; border-radius:6px; font-family:var(--mono); font-weight:700;
+    font-size:13px; letter-spacing:.04em; cursor:pointer;
+  }
+  .send-btn:hover{ filter:brightness(1.08); }
+  .send-btn:active{ transform: translateY(1px); }
+  .live-row{ display:flex; align-items:center; gap:8px; margin-top:10px; justify-content:center; }
+  .live-row span{ font-family:var(--mono); font-size:11px; color:var(--muted); }
+
+  /* center readout */
+  .center-top{ display:flex; gap:20px; align-items:center; margin-bottom:18px; }
+  .gauge-wrap{ position:relative; width:150px; height:150px; flex:none; }
+  .readout{ flex:1; }
+  .basal-num{ font-family:var(--mono); font-size:52px; font-weight:700; line-height:1; color:var(--trace); }
+  .basal-unit{ font-family:var(--mono); font-size:14px; color:var(--muted); margin-left:6px; }
+  .badges{ display:flex; gap:8px; margin-top:10px; }
+  .badge{
+    font-family:var(--mono); font-size:11px; padding:4px 10px; border-radius:20px;
+    border:1px solid var(--grid); color:var(--muted); letter-spacing:.05em;
+  }
+  .badge.mode-auto{ color:var(--trace); border-color:var(--trace-dim); background:rgba(79,216,196,.08); }
+  .badge.mode-safe{ color:var(--danger); border-color:var(--danger); background:rgba(232,92,74,.08); }
+  .badge.status-high{ color:var(--amber); border-color:var(--amber); }
+  .badge.status-low{ color:var(--danger); border-color:var(--danger); }
+  .badge.status-ok{ color:var(--trace); border-color:var(--trace-dim); }
+
+  .trace-box{ border-top:1px solid var(--grid); padding-top:14px; }
+  .trace-box .cap{ font-family:var(--mono); font-size:11px; color:var(--muted); margin-bottom:8px; letter-spacing:.08em;}
+  svg.trace{ width:100%; height:110px; display:block; }
+
+  .reason-line{
+    font-family:var(--mono); font-size:12px; color:var(--muted); margin-top:14px;
+    padding:10px 12px; background:var(--panel-alt); border-radius:6px; border:1px solid var(--grid);
+  }
+
+  /* right: log + network */
+  .log{
+    font-family:var(--mono); font-size:11px; line-height:1.6; color:var(--muted);
+    height:150px; overflow-y:auto; margin-bottom:18px; padding-right:4px;
+  }
+  .log div{ border-bottom:1px dashed var(--grid); padding:4px 0; }
+  .log div .t{ color:var(--trace); }
+  .log div .a{ color:var(--amber); }
+  .log div .d{ color:var(--danger); }
+
+  .netbox svg{ width:100%; height:160px; display:block; }
+
+  .footnote{
+    margin-top:22px; font-family:var(--mono); font-size:11px; color:var(--muted); text-align:center;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="topbar">
+    <div class="brand">
+      <span class="eyebrow">Closed-Loop Control · Demo Console</span>
+    </div>
+    <div class="brand">
+      <h1>INSA<span>LO</span></h1>
+    </div>
+    <div class="conn">
+      <span class="dot" id="connDot"></span>
+      <input id="piHost" type="text" placeholder="pi-ip:5000" value="raspberrypi.local:5000">
+      <button class="small" id="testConn">test</button>
+    </div>
+  </div>
+
+  <div class="grid">
+
+    <!-- LEFT: inputs -->
+    <div class="panel">
+      <h2>Physiological Inputs</h2>
+
+      <div class="field">
+        <label>BGL <b id="lblBgl">6.1</b> mmol/L</label>
+        <input type="range" id="bgl" min="2" min="2" max="25" step="0.1" value="6.1">
+      </div>
+      <div class="field">
+        <label>Trend <b id="lblTrend">+0.0</b> /15min</label>
+        <input type="range" id="trend" min="-3" max="3" step="0.1" value="0">
+      </div>
+      <div class="field">
+        <label>Carbs <b id="lblCarbs">0</b> g</label>
+        <input type="range" id="carbs" min="0" max="60" step="5" value="0">
+      </div>
+      <div class="field">
+        <label>Hours since bolus <b id="lblHours">4.0</b></label>
+        <input type="range" id="hours" min="0" max="6" step="0.25" value="4">
+      </div>
+
+      <div class="field">
+        <label style="margin-bottom:6px;">Exercise</label>
+        <select id="exercise">
+          <option value="none">none</option>
+          <option value="light">light</option>
+          <option value="moderate">moderate</option>
+          <option value="high">high</option>
+        </select>
+      </div>
+      <div class="field">
+        <label style="margin-bottom:6px;">Stress</label>
+        <select id="stress">
+          <option value="low">low</option>
+          <option value="medium">medium</option>
+          <option value="high">high</option>
+        </select>
+      </div>
+      <div class="field">
+        <label style="margin-bottom:6px;">Cycle phase</label>
+        <select id="cycle">
+          <option value="follicular">follicular</option>
+          <option value="ovulation">ovulation</option>
+          <option value="luteal">luteal</option>
+          <option value="menstrual">menstrual</option>
+        </select>
+      </div>
+
+      <div class="toggle-row">
+        <span>CGM Active</span>
+        <label class="switch">
+          <input type="checkbox" id="cgmActive" checked>
+          <span class="slider-tog"></span>
+        </label>
+      </div>
+
+      <button class="send-btn" id="sendBtn">SEND TO CONTROLLER</button>
+      <div class="live-row">
+        <label class="switch">
+          <input type="checkbox" id="liveMode">
+          <span class="slider-tog"></span>
+        </label>
+        <span>live mode (auto-send every 2s)</span>
+      </div>
+    </div>
+
+    <!-- CENTER: readout -->
+    <div class="panel">
+      <h2>Controller Output</h2>
+      <div class="center-top">
+        <div class="gauge-wrap">
+          <svg viewBox="0 0 150 150">
+            <circle cx="75" cy="75" r="62" fill="none" stroke="var(--grid)" stroke-width="10"/>
+            <circle id="gaugeArc" cx="75" cy="75" r="62" fill="none" stroke="var(--trace)"
+              stroke-width="10" stroke-linecap="round"
+              stroke-dasharray="389.6" stroke-dashoffset="389.6"
+              transform="rotate(-90 75 75)"/>
+          </svg>
+        </div>
+        <div class="readout">
+          <div><span class="basal-num" id="basalNum">--</span><span class="basal-unit">U/hr</span></div>
+          <div class="badges">
+            <span class="badge" id="badgeMode">MODE: —</span>
+            <span class="badge" id="badgeStatus">BGL: —</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="reason-line" id="reasonLine">Awaiting first decision…</div>
+
+      <div class="trace-box">
+        <div class="cap">BASAL RATE — RECENT DECISIONS</div>
+        <svg class="trace" viewBox="0 0 600 110" preserveAspectRatio="none" id="traceSvg">
+          <line x1="0" y1="55" x2="600" y2="55" stroke="var(--grid)" stroke-width="1"/>
+          <polyline id="tracePoly" fill="none" stroke="var(--trace)" stroke-width="2" points=""/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- RIGHT: log + network -->
+    <div class="panel">
+      <h2>Decision Log</h2>
+      <div class="log" id="logBox"><div>waiting for connection…</div></div>
+
+      <h2 style="margin-top:6px;">Network Activity</h2>
+      <div class="netbox">
+        <svg viewBox="0 0 280 160" id="netSvg"></svg>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="footnote">Local demo console · talks directly to the Pi over your LAN · does not command the pump motor</div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const traceHistory = [];
+
+// ---- slider label wiring ----
+const bgl = $('bgl'), trend = $('trend'), carbs = $('carbs'), hours = $('hours');
+bgl.oninput = () => $('lblBgl').textContent = parseFloat(bgl.value).toFixed(1);
+trend.oninput = () => $('lblTrend').textContent = (parseFloat(trend.value) >= 0 ? '+' : '') + parseFloat(trend.value).toFixed(1);
+carbs.oninput = () => $('lblCarbs').textContent = carbs.value;
+hours.oninput = () => $('lblHours').textContent = parseFloat(hours.value).toFixed(2);
+
+// ---- network diagram (static layout, 8 -> 16 -> 8 -> 1) ----
+const LAYER_SIZES = [8, 16, 8, 1];
+function buildNetSvg(){
+  const svg = $('netSvg');
+  svg.innerHTML = '';
+  const W = 280, H = 160, pad = 20;
+  const xs = LAYER_SIZES.map((_, i) => pad + i * (W - 2*pad) / (LAYER_SIZES.length - 1));
+  const nodePositions = [];
+
+  LAYER_SIZES.forEach((count, li) => {
+    const ys = [];
+    for(let n = 0; n < count; n++){
+      const y = H/2 + (n - (count-1)/2) * Math.min(14, (H-2*pad)/count);
+      ys.push(y);
+    }
+    nodePositions.push(ys.map(y => ({x: xs[li], y})));
+  });
+
+  // edges (subsampled for clarity)
+  for(let li = 0; li < nodePositions.length - 1; li++){
+    nodePositions[li].forEach((a, ai) => {
+      nodePositions[li+1].forEach((b, bi) => {
+        if((ai + bi) % 3 !== 0) return; // thin out edges visually
+        const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+        line.setAttribute('x1', a.x); line.setAttribute('y1', a.y);
+        line.setAttribute('x2', b.x); line.setAttribute('y2', b.y);
+        line.setAttribute('stroke', 'var(--grid)');
+        line.setAttribute('stroke-width', '1');
+        line.classList.add('edge');
+        svg.appendChild(line);
+      });
+    });
+  }
+  // nodes
+  nodePositions.forEach((layer, li) => {
+    layer.forEach((p, ni) => {
+      const c = document.createElementNS('http://www.w3.org/2000/svg','circle');
+      c.setAttribute('cx', p.x); c.setAttribute('cy', p.y); c.setAttribute('r', 4.5);
+      c.setAttribute('fill', 'var(--panel-alt)');
+      c.setAttribute('stroke', 'var(--grid)');
+      c.setAttribute('data-layer', li); c.setAttribute('data-node', ni);
+      svg.appendChild(c);
+    });
+  });
+  return nodePositions;
+}
+let netNodePositions = buildNetSvg();
+
+function animateActivations(activations){
+  if(!activations) return;
+  const svg = $('netSvg');
+  const circles = svg.querySelectorAll('circle');
+  // activations[0] is the raw input layer (8 values, unnormalized-ish),
+  // activations[1..] are hidden/output layers after relu/sigmoid
+  circles.forEach(c => {
+    const li = parseInt(c.getAttribute('data-layer'));
+    const ni = parseInt(c.getAttribute('data-node'));
+    const layerVals = activations[li];
+    if(!layerVals || layerVals[ni] === undefined) return;
+    let v = layerVals[ni];
+    // normalize roughly for color intensity
+    let mag = Math.max(0, Math.min(1, Math.abs(v) / (li === 0 ? 25 : 1)));
+    const col = `rgba(79, 216, 196, ${0.15 + mag * 0.85})`;
+    c.setAttribute('fill', col);
+  });
+}
+
+// ---- gauge ----
+const GAUGE_CIRC = 389.6;
+function setGauge(basal){
+  const frac = Math.max(0, Math.min(1, basal / 5.0));
+  const offset = GAUGE_CIRC * (1 - frac);
+  $('gaugeArc').setAttribute('stroke-dashoffset', offset);
+}
+
+// ---- trace strip ----
+function pushTrace(basal){
+  traceHistory.push(basal);
+  if(traceHistory.length > 40) traceHistory.shift();
+  const pts = traceHistory.map((v, i) => {
+    const x = (i / 39) * 600;
+    const y = 100 - (v / 5.0) * 90;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  $('tracePoly').setAttribute('points', pts);
+}
+
+// ---- log ----
+function pushLog(text, cls){
+  const box = $('logBox');
+  const line = document.createElement('div');
+  const stamp = new Date().toLocaleTimeString();
+  line.innerHTML = `<span class="${cls||''}">[${stamp}]</span> ${text}`;
+  box.prepend(line);
+  while(box.children.length > 25) box.removeChild(box.lastChild);
+}
+
+// ---- connection ----
+function baseUrl(){
+  let h = $('piHost').value.trim();
+  if(!h.startsWith('http')) h = 'http://' + h;
+  return h;
+}
+
+async function testConnection(){
+  const dot = $('connDot');
+  try{
+    const r = await fetch(baseUrl() + '/health', {method:'GET'});
+    const j = await r.json();
+    dot.className = 'dot live';
+    pushLog('connected — controller trained: ' + j.trained, 't');
+  }catch(e){
+    dot.className = 'dot bad';
+    pushLog('connection failed: ' + e.message, 'd');
+  }
+}
+$('testConn').onclick = testConnection;
+
+// ---- send decision ----
+async function sendDecision(){
+  const payload = {
+    bgl: parseFloat(bgl.value),
+    bgl_trend: parseFloat(trend.value),
+    exercise: $('exercise').value,
+    stress: $('stress').value,
+    cycle_phase: $('cycle').value,
+    carbs_g: parseFloat(carbs.value),
+    hours_since_bolus: parseFloat(hours.value),
+    cgm_active: $('cgmActive').checked,
+  };
+  try{
+    const r = await fetch(baseUrl() + '/decide', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const j = await r.json();
+    if(!j.ok){ pushLog('error: ' + j.error, 'd'); return; }
+
+    $('connDot').className = 'dot live';
+    $('basalNum').textContent = j.basal_rate.toFixed(2);
+    setGauge(j.basal_rate);
+    pushTrace(j.basal_rate);
+
+    const modeBadge = $('badgeMode');
+    modeBadge.textContent = 'MODE: ' + j.mode;
+    modeBadge.className = 'badge ' + (j.mode === 'SAFE' ? 'mode-safe' : 'mode-auto');
+
+    const statusBadge = $('badgeStatus');
+    let statusCls = 'status-ok', statusTxt = 'ON TARGET';
+    if(j.reason.includes('HIGH')){ statusCls='status-high'; statusTxt='HIGH'; }
+    else if(j.reason.includes('LOW')){ statusCls='status-low'; statusTxt='LOW'; }
+    else if(j.mode === 'SAFE'){ statusCls='status-low'; statusTxt='SAFE MODE'; }
+    statusBadge.textContent = 'BGL: ' + statusTxt;
+    statusBadge.className = 'badge ' + statusCls;
+
+    $('reasonLine').textContent = j.reason;
+    animateActivations(j.activations);
+
+    pushLog(`basal ${j.basal_rate.toFixed(2)} U/hr · ${j.mode}`,
+      j.mode === 'SAFE' ? 'd' : 't');
+  }catch(e){
+    $('connDot').className = 'dot bad';
+    pushLog('send failed: ' + e.message, 'd');
+  }
+}
+$('sendBtn').onclick = sendDecision;
+
+// ---- live mode ----
+let liveTimer = null;
+$('liveMode').onchange = (e) => {
+  if(e.target.checked){
+    liveTimer = setInterval(sendDecision, 2000);
+  } else {
+    clearInterval(liveTimer);
+  }
+};
+
+// try an initial connection check
+testConnection();
+</script>
+</body>
+</html>

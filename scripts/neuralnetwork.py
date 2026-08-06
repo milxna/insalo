@@ -7,54 +7,66 @@ import json
 import time
 
 # CONSTANTS
-TARGET_BGL    = 6.1    # mmol/L 
-SAFE_BASAL    = 1.5    # U/h    - AS PER CRITERION 2
-DEFAULT_BASAL = 3.0    # U/h    
-MAX_BASAL     = 5.0    # U/h    
-MIN_BASAL     = 0.0    # U/h    
-CGM_VALID_MIN = 4.0    # mmol/L 
-CGM_VALID_MAX = 22.0   # mmol/L 
+TARGET_BGL    = 6.1    # mmol/L
+SAFE_DELIVERY    = 1.5    # U/h    - AS PER CRITERION 2
+MAX_DELIVERY     = 6.0    # U/h  
+BGL_LOW_REF, BGL_LOW_REF_DOSE   = 8.0, 0.20   # mmol/L, U/cycle
+BGL_SATURATION_TARGET           = 16.5        # mmol/L - dose saturates at MAX_DELIVERY here
+
+_rate_low  = BGL_LOW_REF_DOSE / (5.0 / 60.0)
+_rate_high = MAX_DELIVERY
+BGL_CORRECTION_GAIN = (_rate_high - _rate_low) / (BGL_SATURATION_TARGET - BGL_LOW_REF)
+DEFAULT_DELIVERY    = _rate_low - BGL_CORRECTION_GAIN * (BGL_LOW_REF - TARGET_BGL)
+
+BGL_SATURATION_TARGET = 16.5   # mmol/L - highest BGL we still want a distinct dose for
+BGL_CORRECTION_GAIN   = (MAX_DELIVERY - DEFAULT_DELIVERY) / (BGL_SATURATION_TARGET - TARGET_BGL)
+MIN_DELIVERY     = 0.0    # U/h
+DOSE_INCREMENT   = 0.05 
+CGM_VALID_MIN = 4.0    # mmol/L - below this, glucose is genuinely low: SUSPEND, don't dose
+CGM_VALID_MAX = 22.0   # mmol/L - above this, reading is implausible: treat as sensor error
 
 # MOTOR CALIBRATION
 CONTROL_PERIOD_MIN = 5.0 / 60.0      # run every 5 mins
 STEPS_PER_REV = 200
-LEADSCREW_PITCH = 1.25     
-MM_PER_UNIT = 0.32         # fixme - calibrate 
+LEADSCREW_PITCH = 1.25
+MM_PER_UNIT = 0.32         # fixme - calibrate
 STEPS_PER_MM = STEPS_PER_REV / LEADSCREW_PITCH
 STEPS_PER_UNIT = MM_PER_UNIT * STEPS_PER_MM
 
 # PHYSIOLOGICAL FACTORS
 CYCLE_MULTIPLIERS = {
-    "follicular": 1.0,   
-    "ovulation":  0.95,   
-    "luteal":     1.2,   
-    "menstrual":  0.9,   
+    "follicular": 1.0,
+    "ovulation":  0.95,
+    "luteal":     1.2,
+    "menstrual":  0.9,
 }
 
 EXERCISE_MULTIPLIERS = {
     "none":     1.0,
-    "light":    0.9,   # walking, yoga (10% decrease in insulin)
-    "moderate": 0.8,   # swimming, cycling (20% decrease in insulin) 
+    "light":    0.9,    # walking, yoga (10% decrease in insulin)
+    "moderate": 0.8,    # swimming, cycling (20% decrease in insulin)
     "high":     0.65,   # AFL, HIIT, contact sport (35% decrease in insulin)
 }
 
 STRESS_MULTIPLIERS = {
-    "low":    1.00, #standard insulin delivery
-    "medium": 1.05, #5% increase in insulin
-    "high":   1.1, #10% increase in insulin need 
+    "low":    1.00,  # standard insulin delivery
+    "medium": 1.05,  # 5% increase in insulin
+    "high":   1.1,   # 10% increase in insulin need
 }
 
 
 # FEATURE ENCODING
-
+# fixme - implement a proper carb-bolus function, separate from decide()'s
+# continuous correction, before carbs_g is used for anything but testing
+# with carbs_g=0.
 def encode(bgl, bglTrend, exercise, stress, cyclePhase,
            carbs_g=0, hoursSinceBolus=4.0):
-    
-    bgl_error  = bgl - TARGET_BGL                          # how far from target ??? 
+
+    bgl_error  = bgl - TARGET_BGL
     exercise_f = EXERCISE_MULTIPLIERS.get(exercise, 1.0)
     stress_f   = STRESS_MULTIPLIERS.get(stress, 1.0)
     cycle_f    = CYCLE_MULTIPLIERS.get(cyclePhase, 1.0)
-    iob        = max(0.0, 1.0 - hoursSinceBolus / 4.0)  
+    iob        = max(0.0, 1.0 - hoursSinceBolus / 4.0)
 
     return [bgl, bgl_error, bglTrend, exercise_f, stress_f,
             cycle_f, carbs_g, iob]
@@ -66,16 +78,15 @@ FEATURE_NAMES = [
     "Exercise factor",
     "Stress factor",
     "Cycle phase factor",
-    "Carbs (g)",
+    "Carbs (g) - PLACEHOLDER, see WARNING above encode()",
     "Insulin on board",
 ]
 
 N_FEATURES = len(FEATURE_NAMES)
 
 
-# NORMALISATION - make everything scaled to the same value for what it is. (see folio for explanation)
-
-featureMins = [2.0,   -7.0,  -3.0,  0.65,  1.00,  0.90,  0.0,   0.0]
+# NORMALISATION
+featureMins = [2.0,   -3.0,  -3.0,  0.65,  1.00,  0.90,  0.0,   0.0]
 featureMaxs = [25.0,  12.0,   3.0,  1.00,  1.30,  1.20,  60.0,  1.0]
 
 def normalise(features):
@@ -85,78 +96,72 @@ def normalise(features):
         result.append((val - lo) / span if span > 0 else 0.0)
     return result
 
-def normaliseTarget(basal):
-    return (basal - MIN_BASAL) / (MAX_BASAL - MIN_BASAL)
+def normaliseTarget(delivery):
+    return (delivery - MIN_DELIVERY) / (MAX_DELIVERY - MIN_DELIVERY)
 
-def denormaliseTarget(norm_basal):
-    return norm_basal * (MAX_BASAL - MIN_BASAL) + MIN_BASAL
+def denormaliseTarget(norm_delivery):
+    return norm_delivery * (MAX_DELIVERY - MIN_DELIVERY) + MIN_DELIVERY
 
-def basalToSteps(basalRate):
-    units = basalRate * CONTROL_PERIOD_MIN
-    return round(units * STEPS_PER_UNIT)
+def roundToIncrement(units, increment=DOSE_INCREMENT):
+    """Rounds a dose to the nearest multiple of `increment` (default 0.05U).
+    This is what actually gets converted to motor steps - it guarantees the
+    dose you report is the dose you deliver, rather than whatever value
+    falls out of rounding the motor's step count."""
+    return round(units / increment) * increment
 
-# DEFINE ACTIVATION FUNCTIONS
-# 1. ReLU - Rectified Linear Unit (the most common activation in neural networks)
-# Basically: "if the signal is positive, pass it through; if negative, block it."
-# 2. Sigmoid - used for the output layer, squashing the output from [0,1] 
-# Formula: sigmoid(x) = 1 / (1 + e^(-x))
+def deliveryToMicrobolus(deliveryRate):
+    """Converts a U/h delivery rate into the exact number of insulin units
+    (U) that will actually be delivered THIS control period (5 min).
+    This is the real dose - deliveryRate on its own is only an hourly
+    equivalent and is never injected as-is."""
+    return deliveryRate * CONTROL_PERIOD_MIN
+
+def microbolusToSteps(microbolus_units):
+    """Converts an exact insulin-unit dose into motor steps."""
+    return round(microbolus_units * STEPS_PER_UNIT)
+
+def deliveryToSteps(deliveryRate):
+    """Convenience wrapper: U/h rate -> motor steps for one control period."""
+    return microbolusToSteps(deliveryToMicrobolus(deliveryRate))
+
+
+# ACTIVATION FUNCTIONS
 
 def relu(x):
     return max(0.0, x)
 
 def reluDerivative(x):
-    # Derivative of ReLU — needed for backpropagation. 1 if x>0, else 0.
     return 1.0 if x > 0 else 0.0
 
 def sigmoid(x):
-    # Clamp to prevent math overflow for very large/small x
     x = max(-500.0, min(500.0, x))
     return 1.0 / (1.0 + math.exp(-x))
 
 def sigmoidDerivative(sig_x):
-    # Derivative of sigmoid given the already-computed sigmoid value.
     return sig_x * (1.0 - sig_x)
 
 
 # THE NEURAL NETWORK
-# Architecture: 8 inputs -> 16 neurons -> 8 neurons -> 1 output
-#
-# Layer 1 (hidden): 16 neurons with ReLU activation : learns low level patterns
-#
-# Layer 2 (hidden): 8 neurons with ReLU activation : combines patterns
-#
-# Layer 3 (output): 1 neuron with Sigmoid activation : outputs a value of [0,1]
-#
-# Each neuron has a weight and bias, which are adjusted during training to minimise the error between
-# the predicted basal rate and the true basal rate (from our synthetic data).
-
 class NeuralNetwork:
 
     def __init__(self, layerSizes=(N_FEATURES, 16, 8, 1), learningRate=0.01):
         self.lr = learningRate
         self.layer_sizes = layerSizes
-
-        # weights[i] is a 2D list: weights[i][j][k] is the weight from
-        # neuron k in layer i to neuron j in layer i+1
         self.weights = []
         self.biases  = []
 
         for i in range(len(layerSizes) - 1):
             n_in  = layerSizes[i]
             n_out = layerSizes[i + 1]
-
-            # "He initialisation": scale random weights by sqrt(2/n_in)
             scale = math.sqrt(2.0 / n_in)
             layer_w = [[random.gauss(0, scale) for _ in range(n_in)]
                        for _ in range(n_out)]
             layer_b = [0.0] * n_out
-
             self.weights.append(layer_w)
             self.biases.append(layer_b)
 
-# Forward Pass
     def forward(self, x):
-        activations     = [x]   
+        activations     = [x]
         pre_activations = []
 
         for i, (W, b) in enumerate(zip(self.weights, self.biases)):
@@ -177,28 +182,23 @@ class NeuralNetwork:
 
     def predictOne(self, x):
         activations, _ = self.forward(x)
-        return activations[-1][0]   
+        return activations[-1][0]
 
     def predict(self, X):
         return [self.predictOne(x) for x in X]
 
-# Backpropagation
-
     def trainOne(self, x, y_true):
-        
         activations, pre_activations = self.forward(x)
         prediction = activations[-1][0]
 
-        # output layer error
         output_error = 2.0 * (prediction - y_true)
         sig_deriv    = sigmoidDerivative(prediction)
-        deltas = [[output_error * sig_deriv]]   
+        deltas = [[output_error * sig_deriv]]
 
-        # backpropagate through hidden layers 
         for i in reversed(range(len(self.weights) - 1)):
-            W_next   = self.weights[i + 1]   
-            d_next   = deltas[0]             
-            z_curr   = pre_activations[i]    
+            W_next   = self.weights[i + 1]
+            d_next   = deltas[0]
+            z_curr   = pre_activations[i]
 
             d_curr = []
             for j in range(len(z_curr)):
@@ -206,21 +206,16 @@ class NeuralNetwork:
                                for k in range(len(d_next)))
                 d_curr.append(upstream * reluDerivative(z_curr[j]))
 
-            deltas.insert(0, d_curr)   
+            deltas.insert(0, d_curr)
 
-        # update weights and biases
         for i in range(len(self.weights)):
             prev_activations = activations[i]
             for j in range(len(self.weights[i])):
                 for k in range(len(self.weights[i][j])):
-                    # Weight update: w -= learning_rate * gradient
                     self.weights[i][j][k] -= self.lr * deltas[i][j] * prev_activations[k]
                 self.biases[i][j] -= self.lr * deltas[i][j]
 
-        # Return loss for monitoring
         return (prediction - y_true) ** 2
-
-# training!
 
     def fit(self, X, y, epochs=200, verbose=True):
         n = len(X)
@@ -235,14 +230,11 @@ class NeuralNetwork:
 
             avg_loss = total_loss / n
 
-            # print progress every 50 epochs
             if verbose and (epoch + 1) % 50 == 0:
                 print("  Epoch {:>3}/{}  |  avg loss: {:.6f}".format(
                     epoch + 1, epochs, avg_loss))
 
         return self
-
-#self evaluation 
 
     def score_r2(self, X, y):
         preds  = self.predict(X)
@@ -260,9 +252,8 @@ class NeuralNetwork:
             if abs(p_real - t_real) <= tolerance_units:
                 correct += 1
         return 100.0 * correct / len(y_norm)
-    
+
     def save_weights(self, filepath="model_weights.json"):
-        """Saves weights, biases, and layer configuration to a JSON file."""
         data = {
             "layer_sizes": self.layer_sizes,
             "weights": self.weights,
@@ -273,7 +264,6 @@ class NeuralNetwork:
         print(f"[INFO] Weights successfully saved to {filepath}")
 
     def load_weights(self, filepath="model_weights.json"):
-        """Loads weights, biases, and layer configuration from a JSON file."""
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"Weight file not found: {filepath}")
 
@@ -286,8 +276,7 @@ class NeuralNetwork:
         print(f"[INFO] Weights successfully loaded from {filepath}")
 
 
-# SYNTHETISE DATA 
-# because I don't have unlimited real data I need something for it to train on, so this basically generates that
+# SYNTHETIC DATA
 
 def generate_training_data(n=10000, seed=42):
     random.seed(seed)
@@ -312,24 +301,20 @@ def generate_training_data(n=10000, seed=42):
         cycle_f    = CYCLE_MULTIPLIERS[phase]
         stress_f   = STRESS_MULTIPLIERS[stress]
         exercise_f = EXERCISE_MULTIPLIERS[exercise]
-
-        basal = (DEFAULT_BASAL
-                 + 0.40 * bgl_error
+        delivery = (DEFAULT_DELIVERY
+                 + BGL_CORRECTION_GAIN * bgl_error
                  + 0.15 * trend
                  + (cycle_f  - 1.0) * 1.5
                  + (stress_f - 1.0) * 0.8
                  - (1.0 - exercise_f) * 1.2
-                 + 0.01 * carbs)
-        basal = max(MIN_BASAL, min(basal, MAX_BASAL))
+                 + 0.01 * carbs)  # PLACEHOLDER - should be a separate carb bolus, see WARNING above encode()
+        delivery = max(MIN_DELIVERY, min(delivery, MAX_DELIVERY))
 
         X.append(norm_feats)
-        y.append(normaliseTarget(basal))
+        y.append(normaliseTarget(delivery))
 
     return X, y
 
-
-# LOAD CSV 
-# the real data I've fed it
 
 def load_cgm_csv(filepath):
     """Load CGM readings from Medtronic CSV export."""
@@ -364,19 +349,6 @@ def load_cgm_csv(filepath):
 # CONTROLLER
 
 class INSALOController:
-    #built to run on Raspberry Pi Zero W 
-
-    #fixme
-    # def __init__(self):
-    #     # self.serial = serial.Serial(
-    #     #                 "/dev/ttyACM0", also this depends ont he port of the arduino so this is subj to change
-    #     #                 115200,
-    #     #                 timeout=1)
-    #     self.serial = None #placeholder
-    #     self.net     = NeuralNetwork(layerSizes=(N_FEATURES, 16, 8, 1),
-    #                                  learningRate=0.01)
-    #     self.trained = False
-
     def __init__(self, arduino_port="/dev/ttyACM0", baudrate=115200, connect=True):
         self.serial = None
         if connect:
@@ -387,7 +359,7 @@ class INSALOController:
             except serial.SerialException as e:
                 print(f"[WARN] Could not connect to Arduino: {e}")
                 self.serial = None
- 
+
         self.net = NeuralNetwork(
             layerSizes=(N_FEATURES, 16, 8, 1), learningRate=0.01
         )
@@ -400,7 +372,7 @@ class INSALOController:
 
     def load_model(self, filepath="insalo_weights.json"):
         self.net.load_weights(filepath)
-        self.trained = True  
+        self.trained = True
 
     def train(self, csv_path=None, n_synthetic=2000, epochs=300,
               test_split=0.2, seed=42):
@@ -431,21 +403,20 @@ class INSALOController:
                     cycle_f    = CYCLE_MULTIPLIERS[phase]
                     stress_f   = STRESS_MULTIPLIERS[stress]
                     exercise_f = EXERCISE_MULTIPLIERS[exercise]
-                    basal = (DEFAULT_BASAL + 0.40 * bgl_error
+                    delivery = (DEFAULT_DELIVERY + BGL_CORRECTION_GAIN * bgl_error
                              + 0.15 * row['bgl_trend']
                              + (cycle_f - 1.0) * 1.5
                              + (stress_f - 1.0) * 0.8
                              - (1.0 - exercise_f) * 1.2
-                             + 0.01 * carbs)
-                    basal = max(MIN_BASAL, min(basal, MAX_BASAL))
+                             + 0.01 * carbs)  # PLACEHOLDER - should be a separate carb bolus, see WARNING above encode()
+                    delivery = max(MIN_DELIVERY, min(delivery, MAX_DELIVERY))
                     X.append(norm_f)
-                    y.append(normaliseTarget(basal))
+                    y.append(normaliseTarget(delivery))
             else:
                 X, y = generate_training_data(n_synthetic, seed)
         else:
             X, y = generate_training_data(n_synthetic, seed)
 
-        # Shuffle and split
         indices = list(range(len(X)))
         random.shuffle(indices)
         X = [X[i] for i in indices]
@@ -471,54 +442,91 @@ class INSALOController:
     def decide(self, bgl, bgl_trend=0.0, exercise='none', stress='low',
                cycle_phase='follicular', carbs_g=0,
                hours_since_bolus=4.0, cgm_active=True):
+        """
+        carbs_g: PLACEHOLDER ONLY. Currently folds carb intake into this
+        same continuous 5-min correction rather than a proper one-time
+        carb bolus - see WARNING above encode(). Leave at 0 until that's
+        implemented; a non-zero value will keep inflating every microbolus
+        for as long as it's passed, not just around the meal.
 
-        # safe mode !!!!!
-        if not cgm_active or not (CGM_VALID_MIN <= bgl <= CGM_VALID_MAX):
-            return {
-                'basal_rate': SAFE_BASAL,
-                'mode':       'SAFE',
-                'reason':     'CGM dropout or invalid BGL - safe mode active',
-            }
+        Decision precedence, all of which now ALWAYS return a 'steps' key
+        (previously only the AUTO branch computed steps, which meant any
+        SAFE-mode result passed to sendMotorCommand() would KeyError or
+        require the caller to guess a fallback):
 
-        if not self.trained:
-            raise RuntimeError("Call .train() before .decide()")
+          1. cgm_active is False  -> true sensor dropout -> SAFE (hold SAFE_DELIVERY)
+          2. bgl > CGM_VALID_MAX  -> implausible reading, sensor error suspected -> SAFE
+          3. bgl <= CGM_VALID_MIN -> genuinely low/at-risk reading -> SUSPEND (0 U/h)
+             This is deliberately NOT the same branch as sensor dropout: if the
+             CGM is reliably reporting a low value, delivering ANY non-zero
+             insulin is the wrong call. Suspend delivery instead.
+          4. otherwise            -> AUTO (neural net decides)
+        """
 
-        features  = encode(bgl, bgl_trend, exercise, stress, cycle_phase,
-                           carbs_g, hours_since_bolus)
-        norm_f    = normalise(features)
-        norm_pred = self.net.predictOne(norm_f)
-        predicted = denormaliseTarget(norm_pred)
-        predicted = max(MIN_BASAL, min(predicted, MAX_BASAL))  # safety clamp
+        if not cgm_active:
+            predicted = SAFE_DELIVERY
+            mode      = 'SAFE'
+            reason    = 'CGM signal lost - holding safe fallback delivery'
 
-        bgl_status = ("HIGH"      if bgl > TARGET_BGL + 1.5 else
-                      "LOW"       if bgl < TARGET_BGL - 1.0 else
-                      "ON TARGET")
+        elif bgl > CGM_VALID_MAX:
+            predicted = SAFE_DELIVERY
+            mode      = 'SAFE'
+            reason    = 'BGL reading implausibly high - sensor error suspected'
 
-        steps = basalToSteps(predicted)
+        elif bgl <= CGM_VALID_MIN:
+            predicted = MIN_DELIVERY
+            mode      = 'SUSPEND'
+            reason    = 'BGL below safe threshold ({:.1f} < {:.1f}) - insulin suspended'.format(
+                            bgl, CGM_VALID_MIN)
+
+        else:
+            if not self.trained:
+                raise RuntimeError("Call .train() before .decide()")
+
+            features  = encode(bgl, bgl_trend, exercise, stress, cycle_phase,
+                               carbs_g, hours_since_bolus)
+            norm_f    = normalise(features)
+            norm_pred = self.net.predictOne(norm_f)
+            predicted = denormaliseTarget(norm_pred)
+
+            bgl_status = ("HIGH"      if bgl > TARGET_BGL + 1.5 else
+                          "LOW"       if bgl < TARGET_BGL - 1.0 else
+                          "ON TARGET")
+            mode   = 'AUTO'
+            reason = "BGL {:.1f} ({}), trend {:+.2f}, ex={}, stress={}, phase={}".format(
+                        bgl, bgl_status, bgl_trend, exercise, stress, cycle_phase)
+
+        # Hard safety clamp applies regardless of which branch set `predicted` -
+        # never trust any single code path (including the network) to self-limit.
+        predicted = max(MIN_DELIVERY, min(predicted, MAX_DELIVERY))
+        microbolus_units = deliveryToMicrobolus(predicted)
+        microbolus_units = roundToIncrement(microbolus_units)  # snap to nearest 0.05U
+        steps = microbolusToSteps(microbolus_units)
+
         return {
-            'basal_rate': round(predicted, 3),
-            'steps':      steps,
-            'mode':       'AUTO',
-            'reason':     "BGL {:.1f} ({}), trend {:+.2f}, ex={}, stress={}, phase={}".format(
-                            bgl, bgl_status, bgl_trend, exercise, stress, cycle_phase),
+            'microbolus_units': round(microbolus_units, 4),  # exact dose (U) delivered THIS cycle, already rounded to the nearest 0.05U
+            'delivery_rate':    round(predicted, 3),          # U/h - the hourly-equivalent rate this microbolus was derived from, not itself a dose
+            'steps':            steps,                        # motor steps corresponding to microbolus_units
+            'mode':             mode,
+            'reason':           reason,
         }
 
     def sendMotorCommand(self, steps):
             if self.serial is None:
                 print(f"[SIM] Would send: MOVE {steps}")
                 return None
-    
+
             command = f"MOVE {steps}\n"
             self.serial.write(command.encode())
             response = self.serial.readline().decode().strip()
-    
+
             if response.startswith("OK"):
                 print(f"Confirmed: {response}")
             elif response.startswith("ERR"):
                 print(f"Rejected by Arduino: {response}")
             else:
                 print(f"Unexpected response: '{response}' - check connection")
-    
+
             return response
 
 if __name__ == "__main__":
@@ -562,33 +570,14 @@ if __name__ == "__main__":
     else:
         print("\nRunning with default test inputs...")
         result = controller.decide(
-            bgl=18.0,
+            bgl=4.0,
             bgl_trend=0.2,
             exercise="moderate",
             stress="low",
             cycle_phase="follicular",
-            carbs_g=40,
+            carbs_g=0,
             hours_since_bolus=1.2,
         )
 
         print("Decision Result:", result)
         controller.sendMotorCommand(result["steps"])
-
-    # #printing basal rate for c++
-    # print(result['basal_rate']) 
-    # deprecated as no longer using c++ for the purposes of this project
-
-# def sendMotorCommand(steps):
-#     arduino = serial.Serial(
-#         "/dev/cu.usbmodemXXXX",
-#         115200,
-#         timeout=1
-#     )
-#     command = f"MOVE {steps}\n"
-#     arduino.write(command.encode())
-#     response = arduino.readline().decode().strip()
-#     print(response)
-#     arduino.close()
-
-
-

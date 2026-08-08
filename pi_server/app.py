@@ -29,7 +29,12 @@ from neuralnetwork import (
 app = Flask(__name__)
 CORS(app)
 
-ctrl = INSALOController(connect=True)
+# --------------------------------------------------------------------------
+# 1. ENABLE HARDWARE CONNECTION
+# Set connect=True so the controller connects to your Arduino over Serial.
+# If your Arduino uses a different port, pass: arduino_port="/dev/ttyUSB0"
+# --------------------------------------------------------------------------
+ctrl = INSALOController(arduino_port="/dev/ttyACM0", connect=True)
 
 WEIGHTS_FILE = os.path.join(
     os.path.dirname(__file__), "..", "scripts", "insalo_weights.json"
@@ -84,6 +89,7 @@ def decide():
         hours_since_bolus = float(data.get("hours_since_bolus", 4.0))
         cgm_active = bool(data.get("cgm_active", True))
 
+        # Calculate decision
         result = ctrl.decide(
             bgl=bgl,
             bgl_trend=bgl_trend,
@@ -94,7 +100,14 @@ def decide():
             cgm_active=cgm_active,
         )
 
-        # Used only to expose the NN activations in the demo UI.
+        # ------------------------------------------------------------------
+        # TRIGGER MOTOR COMMAND
+        # ------------------------------------------------------------------
+        if result.get("steps", 0) > 0:
+            print(f"[MOTOR] Sending {result['steps']} steps to Arduino...")
+            ctrl.sendMotorCommand(result["steps"])
+
+        # Expose NN activations for demo UI
         activations_out = None
         is_auto = (
             cgm_active
@@ -122,6 +135,7 @@ def decide():
         })
 
     except Exception as e:
+        print(f"[ERROR /decide] {e}")
         return jsonify({"ok": False, "error": str(e)}), 400
 
 
@@ -136,11 +150,20 @@ def carb_bolus():
         carbs_g = float(data.get("carbs_g", 0))
         ratio = float(data.get("insulin_to_carb_ratio", kCarbRatio))
 
+        # Calculate bolus steps
         result = ctrl.carbBolus(carbs_g, carbRatio=ratio)
+
+        # ------------------------------------------------------------------
+        # TRIGGER MOTOR COMMAND
+        # ------------------------------------------------------------------
+        if result.get("steps", 0) > 0:
+            print(f"[MOTOR] Sending {result['steps']} steps for carb bolus...")
+            ctrl.sendMotorCommand(result["steps"])
 
         return jsonify({"ok": True, **result})
 
     except Exception as e:
+        print(f"[ERROR /carb-bolus] {e}")
         return jsonify({"ok": False, "error": str(e)}), 400
 
 

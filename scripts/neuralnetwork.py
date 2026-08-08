@@ -7,69 +7,69 @@ import json
 import time
 
 # CONSTANTS
-TARGET_BGL    = 6.1    # mmol/L
-SAFE_DELIVERY    = 1.5    # U/h    - AS PER CRITERION 2
-MAX_DELIVERY     = 6.0    # U/h  
-BGL_LOW_REF, BGL_LOW_REF_DOSE   = 8.0, 0.20   # mmol/L, U/cycle
-BGL_SATURATION_TARGET           = 16.5        # mmol/L - dose saturates at MAX_DELIVERY here
+kTargetBGL    = 6.1    # mmol/L
+kSafeLimit    = 1.5    # U/h    - AS PER CRITERION 2
+kMaxLimit     = 6.0    # U/h    - gives max 0.5U per 5-min microbolus (6.0 * 5/60 = 0.5U)
+kLowRefPoint, kLowRefDose   = 8.0, 0.20   # mmol/L, U/cycle
+kBGLSaturationTarget           = 16.5        # mmol/L - dose saturates at MAX_DELIVERY here
 
-_rate_low  = BGL_LOW_REF_DOSE / (5.0 / 60.0)
-_rate_high = MAX_DELIVERY
-BGL_CORRECTION_GAIN = (_rate_high - _rate_low) / (BGL_SATURATION_TARGET - BGL_LOW_REF)
-DEFAULT_DELIVERY    = _rate_low - BGL_CORRECTION_GAIN * (BGL_LOW_REF - TARGET_BGL)
+_rate_low  = kLowRefDose / (5.0 / 60.0)
+_rate_high = kMaxLimit
+kbglCorrectionGain = (_rate_high - _rate_low) / (kBGLSaturationTarget - kLowRefPoint)
+kDefaultDelivery    = _rate_low - kbglCorrectionGain * (kLowRefPoint - kTargetBGL)
 
-BGL_SATURATION_TARGET = 16.5   # mmol/L - highest BGL we still want a distinct dose for
-BGL_CORRECTION_GAIN   = (MAX_DELIVERY - DEFAULT_DELIVERY) / (BGL_SATURATION_TARGET - TARGET_BGL)
-MIN_DELIVERY     = 0.0    # U/h
-DOSE_INCREMENT   = 0.05 
-CGM_VALID_MIN = 4.0    # mmol/L - below this, glucose is genuinely low: SUSPEND, don't dose
-CGM_VALID_MAX = 22.0   # mmol/L - above this, reading is implausible: treat as sensor error
+kMinDelivery     = 0.0    # U/h
+kDoseIncrement   = 0.05   # U
+kCGMValidMin = 6.1    # mmol/L - below this no more insulin is required so suspend
+kCGMValidMax = 25.0   # mmol/L - above this, treat the CGM reading as invalid    # mmol/L - below this no more insulin is required so suspend
+
+kCarbRatio = 4.5   # g of carbs covered by 1 U of insulin
+kMaxCarbBolus         = 10.0   # U - max carb bolus delivery
 
 # MOTOR CALIBRATION
-CONTROL_PERIOD_MIN = 5.0 / 60.0      # run every 5 mins
-STEPS_PER_REV = 200
-LEADSCREW_PITCH = 1.25
-MM_PER_UNIT = 0.32         # fixme - calibrate
-STEPS_PER_MM = STEPS_PER_REV / LEADSCREW_PITCH
-STEPS_PER_UNIT = MM_PER_UNIT * STEPS_PER_MM
+kControlPeriod = 5.0 / 60.0      # run every 5 mins
+kStepsPerRev = 200
+kLeadscrewPitch = 1.25
+kMMPerUnit = 0.32         # fixme - calibrate
+kStepsPerMM = kStepsPerRev / kLeadscrewPitch
+kStepsPerUnit = kMMPerUnit * kStepsPerMM
 
 # PHYSIOLOGICAL FACTORS
-CYCLE_MULTIPLIERS = {
+kCycleMultipliers = {
     "follicular": 1.0,
     "ovulation":  0.95,
     "luteal":     1.2,
     "menstrual":  0.9,
 }
 
-EXERCISE_MULTIPLIERS = {
+kExerciseMultipliers = {
     "none":     1.0,
     "light":    0.9,    # walking, yoga (10% decrease in insulin)
     "moderate": 0.8,    # swimming, cycling (20% decrease in insulin)
     "high":     0.65,   # AFL, HIIT, contact sport (35% decrease in insulin)
 }
 
-STRESS_MULTIPLIERS = {
+kStressMultipliers = {
     "low":    1.00,  # standard insulin delivery
     "medium": 1.05,  # 5% increase in insulin
     "high":   1.1,   # 10% increase in insulin need
 }
 
 
-# FEATURE ENCODING
-# fixme - implement a proper carb-bolus function, separate from decide()'s
-# continuous correction, before carbs_g is used for anything but testing
-# with carbs_g=0.
-def encode(bgl, bglTrend, exercise, stress, cyclePhase,
-           carbs_g=0, hoursSinceBolus=4.0):
 
-    bgl_error  = bgl - TARGET_BGL
-    exercise_f = EXERCISE_MULTIPLIERS.get(exercise, 1.0)
-    stress_f   = STRESS_MULTIPLIERS.get(stress, 1.0)
-    cycle_f    = CYCLE_MULTIPLIERS.get(cyclePhase, 1.0)
+# FEATURE ENCODING
+
+def encode(bgl, bglTrend, exercise, stress, cyclePhase,
+           hoursSinceBolus=4.0):
+
+    bgl_error  = bgl - kTargetBGL
+    exercise_f = kExerciseMultipliers.get(exercise, 1.0)
+    stress_f   = kStressMultipliers.get(stress, 1.0)
+    cycle_f    = kCycleMultipliers.get(cyclePhase, 1.0)
     iob        = max(0.0, 1.0 - hoursSinceBolus / 4.0)
 
     return [bgl, bgl_error, bglTrend, exercise_f, stress_f,
-            cycle_f, carbs_g, iob]
+            cycle_f, iob]
 
 FEATURE_NAMES = [
     "BGL (mmol/L)",
@@ -78,7 +78,6 @@ FEATURE_NAMES = [
     "Exercise factor",
     "Stress factor",
     "Cycle phase factor",
-    "Carbs (g) - PLACEHOLDER, see WARNING above encode()",
     "Insulin on board",
 ]
 
@@ -86,8 +85,8 @@ N_FEATURES = len(FEATURE_NAMES)
 
 
 # NORMALISATION
-featureMins = [2.0,   -3.0,  -3.0,  0.65,  1.00,  0.90,  0.0,   0.0]
-featureMaxs = [25.0,  12.0,   3.0,  1.00,  1.30,  1.20,  60.0,  1.0]
+featureMins = [2.0,   -3.0,  -3.0,  0.65,  1.00,  0.90,  0.0]
+featureMaxs = [25.0,  12.0,   3.0,  1.00,  1.30,  1.20,  1.0]
 
 def normalise(features):
     result = []
@@ -97,12 +96,12 @@ def normalise(features):
     return result
 
 def normaliseTarget(delivery):
-    return (delivery - MIN_DELIVERY) / (MAX_DELIVERY - MIN_DELIVERY)
+    return (delivery - kMinDelivery) / (kMaxLimit - kMinDelivery)
 
 def denormaliseTarget(norm_delivery):
-    return norm_delivery * (MAX_DELIVERY - MIN_DELIVERY) + MIN_DELIVERY
+    return norm_delivery * (kMaxLimit - kMinDelivery) + kMinDelivery
 
-def roundToIncrement(units, increment=DOSE_INCREMENT):
+def roundToIncrement(units, increment=kDoseIncrement):
     """Rounds a dose to the nearest multiple of `increment` (default 0.05U).
     This is what actually gets converted to motor steps - it guarantees the
     dose you report is the dose you deliver, rather than whatever value
@@ -114,19 +113,30 @@ def deliveryToMicrobolus(deliveryRate):
     (U) that will actually be delivered THIS control period (5 min).
     This is the real dose - deliveryRate on its own is only an hourly
     equivalent and is never injected as-is."""
-    return deliveryRate * CONTROL_PERIOD_MIN
+    return deliveryRate * kControlPeriod
 
 def microbolusToSteps(microbolus_units):
     """Converts an exact insulin-unit dose into motor steps."""
-    return round(microbolus_units * STEPS_PER_UNIT)
+    return round(microbolus_units * kStepsPerUnit)
 
 def deliveryToSteps(deliveryRate):
     """Convenience wrapper: U/h rate -> motor steps for one control period."""
     return microbolusToSteps(deliveryToMicrobolus(deliveryRate))
 
 
-# ACTIVATION FUNCTIONS
+def carbBolusUnits(carbs_g, insulin_to_carb_ratio=kCarbRatio):
+    """Computes a one time carb bolus dose (U), entirely separate from the
+    continuous 5-min correction in decide().
+    """
+    if carbs_g <= 0:
+        return 0.0
+    units = carbs_g / insulin_to_carb_ratio
+    units = roundToIncrement(units)
+    units = max(0.0, min(units, kMaxCarbBolus))
+    return units
 
+
+# ACTIVATION FUNCTIONS
 def relu(x):
     return max(0.0, x)
 
@@ -142,6 +152,7 @@ def sigmoidDerivative(sig_x):
 
 
 # THE NEURAL NETWORK
+# Architecture: 8 inputs -> 16 neurons -> 8 neurons -> 1 output
 class NeuralNetwork:
 
     def __init__(self, layerSizes=(N_FEATURES, 16, 8, 1), learningRate=0.01):
@@ -280,9 +291,9 @@ class NeuralNetwork:
 
 def generate_training_data(n=10000, seed=42):
     random.seed(seed)
-    phases    = list(CYCLE_MULTIPLIERS)
-    exercises = list(EXERCISE_MULTIPLIERS)
-    stresses  = list(STRESS_MULTIPLIERS)
+    phases    = list(kCycleMultipliers)
+    exercises = list(kExerciseMultipliers)
+    stresses  = list(kStressMultipliers)
 
     X, y = [], []
     for _ in range(n):
@@ -291,24 +302,24 @@ def generate_training_data(n=10000, seed=42):
         exercise  = random.choice(exercises)
         stress    = random.choice(stresses)
         phase     = random.choice(phases)
-        carbs     = random.choice([0, 0, 0, 15, 30, 45, 60])
         iob_hours = random.uniform(0, 5)
 
-        features   = encode(bgl, trend, exercise, stress, phase, carbs, iob_hours)
+        features   = encode(bgl, trend, exercise, stress, phase, iob_hours)
         norm_feats = normalise(features)
 
-        bgl_error  = bgl - TARGET_BGL
-        cycle_f    = CYCLE_MULTIPLIERS[phase]
-        stress_f   = STRESS_MULTIPLIERS[stress]
-        exercise_f = EXERCISE_MULTIPLIERS[exercise]
-        delivery = (DEFAULT_DELIVERY
-                 + BGL_CORRECTION_GAIN * bgl_error
+        bgl_error  = bgl - kTargetBGL
+        cycle_f    = kCycleMultipliers[phase]
+        stress_f   = kStressMultipliers[stress]
+        exercise_f = kExerciseMultipliers[exercise]
+
+
+        delivery = (kDefaultDelivery
+                 + kbglCorrectionGain * bgl_error
                  + 0.15 * trend
                  + (cycle_f  - 1.0) * 1.5
                  + (stress_f - 1.0) * 0.8
-                 - (1.0 - exercise_f) * 1.2
-                 + 0.01 * carbs)  # PLACEHOLDER - should be a separate carb bolus, see WARNING above encode()
-        delivery = max(MIN_DELIVERY, min(delivery, MAX_DELIVERY))
+                 - (1.0 - exercise_f) * 1.2)
+        delivery = max(kMinDelivery, min(delivery, kMaxLimit))
 
         X.append(norm_feats)
         y.append(normaliseTarget(delivery))
@@ -349,6 +360,8 @@ def load_cgm_csv(filepath):
 # CONTROLLER
 
 class INSALOController:
+    # built to run on Raspberry Pi Zero W
+
     def __init__(self, arduino_port="/dev/ttyACM0", baudrate=115200, connect=True):
         self.serial = None
         if connect:
@@ -387,29 +400,27 @@ class INSALOController:
 
             if cgm_rows:
                 X, y = [], []
-                phases    = list(CYCLE_MULTIPLIERS)
-                exercises = list(EXERCISE_MULTIPLIERS)
-                stresses  = list(STRESS_MULTIPLIERS)
+                phases    = list(kCycleMultipliers)
+                exercises = list(kExerciseMultipliers)
+                stresses  = list(kStressMultipliers)
                 for row in cgm_rows:
                     exercise = random.choice(exercises)
                     stress   = random.choice(stresses)
                     phase    = random.choice(phases)
-                    carbs    = random.choice([0, 0, 0, 15, 30])
                     iob      = random.uniform(0, 4)
                     features = encode(row['bgl'], row['bgl_trend'],
-                                      exercise, stress, phase, carbs, iob)
+                                      exercise, stress, phase, iob)
                     norm_f   = normalise(features)
-                    bgl_error  = row['bgl'] - TARGET_BGL
-                    cycle_f    = CYCLE_MULTIPLIERS[phase]
-                    stress_f   = STRESS_MULTIPLIERS[stress]
-                    exercise_f = EXERCISE_MULTIPLIERS[exercise]
-                    delivery = (DEFAULT_DELIVERY + BGL_CORRECTION_GAIN * bgl_error
+                    bgl_error  = row['bgl'] - kTargetBGL
+                    cycle_f    = kCycleMultipliers[phase]
+                    stress_f   = kStressMultipliers[stress]
+                    exercise_f = kExerciseMultipliers[exercise]
+                    delivery = (kDefaultDelivery + kbglCorrectionGain * bgl_error
                              + 0.15 * row['bgl_trend']
                              + (cycle_f - 1.0) * 1.5
                              + (stress_f - 1.0) * 0.8
-                             - (1.0 - exercise_f) * 1.2
-                             + 0.01 * carbs)  # PLACEHOLDER - should be a separate carb bolus, see WARNING above encode()
-                    delivery = max(MIN_DELIVERY, min(delivery, MAX_DELIVERY))
+                             - (1.0 - exercise_f) * 1.2)
+                    delivery = max(kMinDelivery, min(delivery, kMaxLimit))
                     X.append(norm_f)
                     y.append(normaliseTarget(delivery))
             else:
@@ -440,75 +451,74 @@ class INSALOController:
         return self
 
     def decide(self, bgl, bgl_trend=0.0, exercise='none', stress='low',
-               cycle_phase='follicular', carbs_g=0,
+               cycle_phase='follicular',
                hours_since_bolus=4.0, cgm_active=True):
         """
-        carbs_g: PLACEHOLDER ONLY. Currently folds carb intake into this
-        same continuous 5-min correction rather than a proper one-time
-        carb bolus - see WARNING above encode(). Leave at 0 until that's
-        implemented; a non-zero value will keep inflating every microbolus
-        for as long as it's passed, not just around the meal.
-
-        Decision precedence, all of which now ALWAYS return a 'steps' key
-        (previously only the AUTO branch computed steps, which meant any
-        SAFE-mode result passed to sendMotorCommand() would KeyError or
-        require the caller to guess a fallback):
-
-          1. cgm_active is False  -> true sensor dropout -> SAFE (hold SAFE_DELIVERY)
-          2. bgl > CGM_VALID_MAX  -> implausible reading, sensor error suspected -> SAFE
-          3. bgl <= CGM_VALID_MIN -> genuinely low/at-risk reading -> SUSPEND (0 U/h)
-             This is deliberately NOT the same branch as sensor dropout: if the
-             CGM is reliably reporting a low value, delivering ANY non-zero
-             insulin is the wrong call. Suspend delivery instead.
-          4. otherwise            -> AUTO (neural net decides)
+        This is the continuous 5-minute correction loop only. Carbs handled separately.
         """
 
         if not cgm_active:
-            predicted = SAFE_DELIVERY
+            predicted = kSafeLimit
             mode      = 'SAFE'
             reason    = 'CGM signal lost - holding safe fallback delivery'
 
-        elif bgl > CGM_VALID_MAX:
-            predicted = SAFE_DELIVERY
+        elif bgl > kCGMValidMax:
+            predicted = kSafeLimit
             mode      = 'SAFE'
             reason    = 'BGL reading implausibly high - sensor error suspected'
 
-        elif bgl <= CGM_VALID_MIN:
-            predicted = MIN_DELIVERY
+        elif bgl <= kCGMValidMin:
+            predicted = kMinDelivery
             mode      = 'SUSPEND'
             reason    = 'BGL below safe threshold ({:.1f} < {:.1f}) - insulin suspended'.format(
-                            bgl, CGM_VALID_MIN)
+                            bgl, kCGMValidMin)
 
         else:
             if not self.trained:
                 raise RuntimeError("Call .train() before .decide()")
 
             features  = encode(bgl, bgl_trend, exercise, stress, cycle_phase,
-                               carbs_g, hours_since_bolus)
+                               hours_since_bolus)
             norm_f    = normalise(features)
             norm_pred = self.net.predictOne(norm_f)
             predicted = denormaliseTarget(norm_pred)
 
-            bgl_status = ("HIGH"      if bgl > TARGET_BGL + 1.5 else
-                          "LOW"       if bgl < TARGET_BGL - 1.0 else
+            bgl_status = ("HIGH"      if bgl > kTargetBGL + 1.5 else
+                          "LOW"       if bgl < kTargetBGL - 1.0 else
                           "ON TARGET")
             mode   = 'AUTO'
             reason = "BGL {:.1f} ({}), trend {:+.2f}, ex={}, stress={}, phase={}".format(
                         bgl, bgl_status, bgl_trend, exercise, stress, cycle_phase)
 
-        # Hard safety clamp applies regardless of which branch set `predicted` -
-        # never trust any single code path (including the network) to self-limit.
-        predicted = max(MIN_DELIVERY, min(predicted, MAX_DELIVERY))
+       
+        predicted = max(kMinDelivery, min(predicted, kMaxLimit))
         microbolus_units = deliveryToMicrobolus(predicted)
         microbolus_units = roundToIncrement(microbolus_units)  # snap to nearest 0.05U
         steps = microbolusToSteps(microbolus_units)
 
         return {
-            'microbolus_units': round(microbolus_units, 4),  # exact dose (U) delivered THIS cycle, already rounded to the nearest 0.05U
-            'delivery_rate':    round(predicted, 3),          # U/h - the hourly-equivalent rate this microbolus was derived from, not itself a dose
-            'steps':            steps,                        # motor steps corresponding to microbolus_units
+            'microbolus_units': round(microbolus_units, 4),  
+            'delivery_rate':    round(predicted, 3),          
+            'steps':            steps,                        
             'mode':             mode,
             'reason':           reason,
+        }
+
+    def carbBolus(self, carbs_g, carbRatio=kCarbRatio):
+        """
+        Just the one time carb bolus.
+        """
+        units = carbBolusUnits(carbs_g, carbRatio)
+        steps = microbolusToSteps(units)
+
+        return {
+            'bolus_units':           round(units, 4),   # exact one-time dose (U)
+            'steps':                 steps,             # motor steps for this bolus
+            'carbs_g':                carbs_g,
+            'insulin_to_carb_ratio':  carbRatio,
+            'mode':                   'CARB_BOLUS',
+            'reason': 'Carb bolus for {:.0f}g at 1U:{:.0f}g ratio'.format(
+                            carbs_g, carbRatio),
         }
 
     def sendMotorCommand(self, steps):
@@ -544,14 +554,14 @@ if __name__ == "__main__":
         controller.train(csv_path=csv_path)
         controller.save_model(WEIGHTS_FILE)
 
-    if len(sys.argv) >= 8:
+    if len(sys.argv) >= 7:
         bgl = float(sys.argv[1])
         bgl_trend = float(sys.argv[2])
         exercise = sys.argv[3]
         stress = sys.argv[4]
         cycle_phase = sys.argv[5]
-        carbs_g = float(sys.argv[6])
-        hours_since_bolus = float(sys.argv[7])
+        hours_since_bolus = float(sys.argv[6])
+        carbs_g = float(sys.argv[7]) if len(sys.argv) >= 8 else 0.0
 
         result = controller.decide(
             bgl,
@@ -559,25 +569,35 @@ if __name__ == "__main__":
             exercise,
             stress,
             cycle_phase,
-            carbs_g,
             hours_since_bolus,
         )
 
-        print("\nDecision Result:")
+        print("\nDecision Result (continuous correction):")
         print(result)
         controller.sendMotorCommand(result["steps"])
+
+        if carbs_g > 0:
+            bolus = controller.carbBolus(carbs_g)
+            print("\nCarb Bolus Result (one-time, separate from above):")
+            print(bolus)
+            controller.sendMotorCommand(bolus["steps"])
 
     else:
         print("\nRunning with default test inputs...")
         result = controller.decide(
-            bgl=4.0,
+            bgl=18.0,
             bgl_trend=0.2,
             exercise="moderate",
             stress="low",
             cycle_phase="follicular",
-            carbs_g=0,
             hours_since_bolus=1.2,
         )
 
-        print("Decision Result:", result)
+        print("Decision Result (continuous correction):", result)
         controller.sendMotorCommand(result["steps"])
+
+        # Example of a separate, one-time carb bolus - NOT run every cycle,
+        # only when the user actually logs a meal via the UI.
+        bolus = controller.carbBolus(carbs_g=40)
+        print("Carb Bolus Result (one-time, separate call):", bolus)
+        controller.sendMotorCommand(bolus["steps"])

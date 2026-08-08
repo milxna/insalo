@@ -126,8 +126,10 @@
   }
   .badge.mode-auto{ color:var(--trace); border-color:var(--trace-dim); background:rgba(79,216,196,.08); }
   .badge.mode-safe{ color:var(--danger); border-color:var(--danger); background:rgba(232,92,74,.08); }
+  .badge.mode-suspend{ color:var(--amber); border-color:var(--amber); background:rgba(242,169,59,.08); }
   .badge.status-high{ color:var(--amber); border-color:var(--amber); }
   .badge.status-low{ color:var(--danger); border-color:var(--danger); }
+  .badge.status-suspend{ color:var(--amber); border-color:var(--amber); }
   .badge.status-ok{ color:var(--trace); border-color:var(--trace-dim); }
 
   .trace-box{ border-top:1px solid var(--grid); padding-top:14px; }
@@ -138,6 +140,25 @@
     font-family:var(--mono); font-size:12px; color:var(--muted); margin-top:14px;
     padding:10px 12px; background:var(--panel-alt); border-radius:6px; border:1px solid var(--grid);
   }
+  .microbolus-line{ font-family:var(--mono); font-size:11px; color:var(--muted); margin-top:8px; }
+  .microbolus-line b{ color:var(--trace); font-weight:600; }
+  .now-delivering{
+    display:flex; align-items:center; gap:10px; margin-top:14px;
+    padding:10px 14px; background:var(--panel-alt); border:1px solid var(--grid); border-radius:6px;
+  }
+  .now-delivering .nd-dot{ width:8px; height:8px; border-radius:50%; background:var(--muted); flex:none; transition:background .2s; }
+  .now-delivering .nd-label{ font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.1em; }
+  .now-delivering .nd-value{ font-family:var(--mono); font-size:16px; font-weight:700; color:var(--trace); margin-left:auto; }
+  .now-delivering.flash{ border-color:var(--trace-dim); }
+  .chart-legend{ display:flex; gap:14px; flex-wrap:wrap; margin-top:8px; font-family:var(--mono); font-size:10px; color:var(--muted); }
+  .chart-legend span{ display:flex; align-items:center; gap:5px; }
+  .chart-legend i{ width:12px; height:2px; display:inline-block; }
+  .sim-clock{ font-family:var(--mono); font-size:12px; color:var(--muted); display:flex; align-items:center; gap:6px; }
+  .sim-clock b{ color:var(--trace); font-size:14px; }
+  .subnote{ font-family:var(--mono); font-size:10px; color:var(--muted); opacity:.75; margin-top:4px; display:block; line-height:1.5; }
+  .control-block{ border-top:1px solid var(--grid); margin-top:14px; padding-top:14px; }
+  .toggle-line{ display:flex; align-items:center; gap:10px; }
+  .toggle-line .lbl{ font-family:var(--mono); font-size:11px; color:var(--muted); }
 
   /* right: log + network */
   .log{
@@ -166,6 +187,9 @@
     <div class="brand">
       <h1>INSA<span>LO</span></h1>
     </div>
+    <div class="sim-clock" id="simClockWrap" style="display:none;">
+      <span>SIM TIME</span><b id="simClock">07:00</b>
+    </div>
     <div class="conn">
       <span class="dot" id="connDot"></span>
       <input id="piHost" type="text" placeholder="pi-ip:5000" value="raspberrypi.local:5000">
@@ -188,9 +212,12 @@
         <input type="range" id="trend" min="-3" max="3" step="0.1" value="0">
       </div>
       <div class="field">
-        <label>Carbs <b id="lblCarbs">0</b> g</label>
-        <input type="range" id="carbs" min="0" max="60" step="5" value="0">
+        <label>Log Meal <b id="lblCarbs">30</b> g</label>
+        <input type="range" id="carbs" min="5" max="90" step="5" value="30">
+        <button class="small" id="bolusBtn" style="width:100%; margin-top:8px; padding:8px; border-color:var(--trace-dim); color:var(--trace);">BOLUS FOR MEAL</button>
+        <span class="subnote">One-time dose, separate from the 5-min correction loop — matches carbBolus(). Not sent automatically; click to log a meal. Ratio: <b id="lblRatio" style="color:var(--trace);">1U:10g</b>.</span>
       </div>
+      <div id="bolusResult" class="microbolus-line" style="display:none;"></div>
       <div class="field">
         <label>Hours since bolus <b id="lblHours">4.0</b></label>
         <input type="range" id="hours" min="0" max="6" step="0.25" value="4">
@@ -232,12 +259,30 @@
       </div>
 
       <button class="send-btn" id="sendBtn">SEND TO CONTROLLER</button>
-      <div class="live-row">
-        <label class="switch">
-          <input type="checkbox" id="liveMode">
-          <span class="slider-tog"></span>
-        </label>
-        <span>live mode (auto-send every 2s)</span>
+
+      <div class="control-block">
+        <div class="toggle-line">
+          <label class="switch">
+            <input type="checkbox" id="liveMode">
+            <span class="slider-tog"></span>
+          </label>
+          <span class="lbl">live mode — auto-send current sliders every 2s</span>
+        </div>
+      </div>
+
+      <div class="control-block">
+        <div class="toggle-line">
+          <label class="switch">
+            <input type="checkbox" id="autoSimMode">
+            <span class="slider-tog"></span>
+          </label>
+          <span class="lbl">auto-simulate patient</span>
+        </div>
+        <select id="simSpeed" style="width:100%; margin-top:10px; padding:7px 8px; font-size:11px;">
+          <option value="60000">realistic — 1 min / tick</option>
+          <option value="3000">fast preview — 3s / tick</option>
+        </select>
+        <span class="subnote">Generates a plausible next reading each tick — BGL drift, occasional meals/exercise — and advances the sim clock 5 sim-min per tick. Overrides manual sliders while on.</span>
       </div>
     </div>
 
@@ -265,12 +310,34 @@
 
       <div class="reason-line" id="reasonLine">Awaiting first decision…</div>
 
+      <div class="now-delivering" id="nowDelivering">
+        <span class="nd-dot" id="ndDot"></span>
+        <span class="nd-label">DELIVERING NOW</span>
+        <span class="nd-value" id="nowDeliveringVal">— U · — steps</span>
+      </div>
+
       <div class="trace-box">
-        <div class="cap">BASAL RATE — RECENT DECISIONS</div>
+        <div class="cap">DELIVERY RATE — RECENT DECISIONS</div>
         <svg class="trace" viewBox="0 0 600 110" preserveAspectRatio="none" id="traceSvg">
           <line x1="0" y1="55" x2="600" y2="55" stroke="var(--grid)" stroke-width="1"/>
           <polyline id="tracePoly" fill="none" stroke="var(--trace)" stroke-width="2" points=""/>
         </svg>
+      </div>
+
+      <div class="trace-box" style="margin-top:16px;">
+        <div class="cap">BLOOD GLUCOSE — LIVE</div>
+        <svg class="trace" viewBox="0 0 600 110" preserveAspectRatio="none" id="bglSvg">
+          <line id="bglMaxLine" x1="0" y1="8" x2="600" y2="8" stroke="var(--danger)" stroke-width="1" stroke-dasharray="4,3" opacity="0.7"/>
+          <line id="bglMinLine" x1="0" y1="95" x2="600" y2="95" stroke="var(--amber)" stroke-width="1" stroke-dasharray="4,3" opacity="0.7"/>
+          <line id="bglTargetLine" x1="0" y1="55" x2="600" y2="55" stroke="var(--trace)" stroke-width="1" stroke-dasharray="2,3" opacity="0.8"/>
+          <polyline id="bglTracePoly" fill="none" stroke="var(--amber)" stroke-width="2" points=""/>
+        </svg>
+        <div class="chart-legend">
+          <span><i style="background:var(--amber);"></i>current BGL</span>
+          <span><i style="background:var(--trace); opacity:.8;"></i>target <b id="legendTarget" style="color:var(--trace);">6.1</b> mmol/L</span>
+          <span><i style="background:var(--amber); opacity:.7;"></i>suspend ≤ <b id="legendMin" style="color:var(--amber);">4.0</b></span>
+          <span><i style="background:var(--danger); opacity:.7;"></i>safe-mode &gt; <b id="legendMax" style="color:var(--danger);">22.0</b></span>
+        </div>
       </div>
     </div>
 
@@ -293,6 +360,8 @@
 <script>
 const $ = id => document.getElementById(id);
 const traceHistory = [];
+const bglHistory = [];
+const bglRange = { lo: 2, hi: 23, target: 6.1, min: 4.0, max: 22.0 };
 
 // ---- slider label wiring ----
 const bgl = $('bgl'), trend = $('trend'), carbs = $('carbs'), hours = $('hours');
@@ -300,6 +369,29 @@ bgl.oninput = () => $('lblBgl').textContent = parseFloat(bgl.value).toFixed(1);
 trend.oninput = () => $('lblTrend').textContent = (parseFloat(trend.value) >= 0 ? '+' : '') + parseFloat(trend.value).toFixed(1);
 carbs.oninput = () => $('lblCarbs').textContent = carbs.value;
 hours.oninput = () => $('lblHours').textContent = parseFloat(hours.value).toFixed(2);
+
+// ---- carb bolus: one-time action, separate from the /decide loop ----
+async function logMealBolus(carbs_g){
+  try{
+    const r = await fetch(baseUrl() + '/carb-bolus', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ carbs_g })
+    });
+    const j = await r.json();
+    if(!j.ok){ pushLog('bolus error: ' + j.error, 'd'); return null; }
+
+    $('bolusResult').style.display = 'block';
+    $('bolusResult').innerHTML =
+      `last bolus: <b>${j.bolus_units.toFixed(2)}</b> U for ${carbs_g}g · <b>${j.steps}</b> steps`;
+    pushLog(`meal bolus: ${j.bolus_units.toFixed(2)}U for ${carbs_g}g carbs`, 'a');
+    return j;
+  }catch(e){
+    pushLog('bolus failed: ' + e.message, 'd');
+    return null;
+  }
+}
+$('bolusBtn').onclick = () => logMealBolus(parseFloat(carbs.value));
 
 // ---- network diagram (static layout, 8 -> 16 -> 8 -> 1) ----
 const LAYER_SIZES = [8, 16, 8, 1];
@@ -370,22 +462,51 @@ function animateActivations(activations){
 
 // ---- gauge ----
 const GAUGE_CIRC = 389.6;
-function setGauge(basal){
-  const frac = Math.max(0, Math.min(1, basal / 5.0));
+let MAX_DELIVERY = 6.0; // fallback until /options responds
+function setGauge(delivery){
+  const frac = Math.max(0, Math.min(1, delivery / MAX_DELIVERY));
   const offset = GAUGE_CIRC * (1 - frac);
   $('gaugeArc').setAttribute('stroke-dashoffset', offset);
 }
 
 // ---- trace strip ----
-function pushTrace(basal){
-  traceHistory.push(basal);
+function pushTrace(delivery){
+  traceHistory.push(delivery);
   if(traceHistory.length > 40) traceHistory.shift();
+  const denom = Math.max(1, traceHistory.length - 1);
   const pts = traceHistory.map((v, i) => {
-    const x = (i / 39) * 600;
-    const y = 100 - (v / 5.0) * 90;
+    const x = (i / denom) * 600;
+    const y = 100 - (v / MAX_DELIVERY) * 90;
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(' ');
   $('tracePoly').setAttribute('points', pts);
+}
+
+// ---- BGL chart: current reading + the network's actual thresholds ----
+function bglToY(v){
+  const clamped = Math.max(bglRange.lo, Math.min(bglRange.hi, v));
+  return 102 - ((clamped - bglRange.lo) / (bglRange.hi - bglRange.lo)) * 94;
+}
+function updateBglReferenceLines(){
+  const yTarget = bglToY(bglRange.target);
+  const yMin = bglToY(bglRange.min);
+  const yMax = bglToY(bglRange.max);
+  $('bglTargetLine').setAttribute('y1', yTarget); $('bglTargetLine').setAttribute('y2', yTarget);
+  $('bglMinLine').setAttribute('y1', yMin);       $('bglMinLine').setAttribute('y2', yMin);
+  $('bglMaxLine').setAttribute('y1', yMax);       $('bglMaxLine').setAttribute('y2', yMax);
+  $('legendTarget').textContent = bglRange.target.toFixed(1);
+  $('legendMin').textContent = bglRange.min.toFixed(1);
+  $('legendMax').textContent = bglRange.max.toFixed(1);
+}
+function pushBglTrace(bglVal){
+  bglHistory.push(bglVal);
+  if(bglHistory.length > 40) bglHistory.shift();
+  const denom = Math.max(1, bglHistory.length - 1);
+  const pts = bglHistory.map((v, i) => {
+    const x = (i / denom) * 600;
+    return `${x.toFixed(1)},${bglToY(v).toFixed(1)}`;
+  }).join(' ');
+  $('bglTracePoly').setAttribute('points', pts);
 }
 
 // ---- log ----
@@ -412,6 +533,22 @@ async function testConnection(){
     const j = await r.json();
     dot.className = 'dot live';
     pushLog('connected — controller trained: ' + j.trained, 't');
+
+    try{
+      const ro = await fetch(baseUrl() + '/options', {method:'GET'});
+      const jo = await ro.json();
+      if(jo.max_delivery) MAX_DELIVERY = jo.max_delivery;
+      if(jo.target_bgl !== undefined) bglRange.target = jo.target_bgl;
+      if(jo.cgm_valid_min !== undefined) bglRange.min = jo.cgm_valid_min;
+      if(jo.cgm_valid_max !== undefined){
+        bglRange.max = jo.cgm_valid_max;
+        bglRange.hi = jo.cgm_valid_max + 2; // headroom above the safe-mode threshold
+      }
+      if(jo.insulin_to_carb_ratio !== undefined){
+        $('lblRatio').textContent = `1U:${jo.insulin_to_carb_ratio.toFixed(0)}g`;
+      }
+      updateBglReferenceLines();
+    }catch(e){ /* non-fatal — keep the fallback thresholds */ }
   }catch(e){
     dot.className = 'dot bad';
     pushLog('connection failed: ' + e.message, 'd');
@@ -419,7 +556,7 @@ async function testConnection(){
 }
 $('testConn').onclick = testConnection;
 
-// ---- send decision ----
+// ---- send decision (continuous 5-min correction loop only) ----
 async function sendDecision(){
   const payload = {
     bgl: parseFloat(bgl.value),
@@ -427,7 +564,6 @@ async function sendDecision(){
     exercise: $('exercise').value,
     stress: $('stress').value,
     cycle_phase: $('cycle').value,
-    carbs_g: parseFloat(carbs.value),
     hours_since_bolus: parseFloat(hours.value),
     cgm_active: $('cgmActive').checked,
   };
@@ -441,27 +577,44 @@ async function sendDecision(){
     if(!j.ok){ pushLog('error: ' + j.error, 'd'); return; }
 
     $('connDot').className = 'dot live';
-    $('basalNum').textContent = j.basal_rate.toFixed(2);
-    setGauge(j.basal_rate);
-    pushTrace(j.basal_rate);
+    $('basalNum').textContent = j.delivery_rate.toFixed(2);
+    setGauge(j.delivery_rate);
+    pushTrace(j.delivery_rate);
+    pushBglTrace(payload.bgl);
 
     const modeBadge = $('badgeMode');
     modeBadge.textContent = 'MODE: ' + j.mode;
-    modeBadge.className = 'badge ' + (j.mode === 'SAFE' ? 'mode-safe' : 'mode-auto');
+    const modeCls = j.mode === 'SAFE' ? 'mode-safe'
+                   : j.mode === 'SUSPEND' ? 'mode-suspend'
+                   : 'mode-auto';
+    modeBadge.className = 'badge ' + modeCls;
+
+    // "delivering now" — the one number someone glancing at the demo
+    // should be able to read instantly
+    const ndColor = j.mode === 'SAFE' ? 'var(--danger)'
+                   : j.mode === 'SUSPEND' ? 'var(--amber)'
+                   : 'var(--trace)';
+    $('ndDot').style.background = ndColor;
+    $('nowDeliveringVal').textContent = `${j.microbolus_units.toFixed(2)} U · ${j.steps} steps`;
+    $('nowDeliveringVal').style.color = ndColor;
+    const ndBox = $('nowDelivering');
+    ndBox.classList.add('flash');
+    setTimeout(() => ndBox.classList.remove('flash'), 400);
 
     const statusBadge = $('badgeStatus');
     let statusCls = 'status-ok', statusTxt = 'ON TARGET';
-    if(j.reason.includes('HIGH')){ statusCls='status-high'; statusTxt='HIGH'; }
-    else if(j.reason.includes('LOW')){ statusCls='status-low'; statusTxt='LOW'; }
+    if(j.mode === 'SUSPEND'){ statusCls='status-suspend'; statusTxt='SUSPENDED'; }
     else if(j.mode === 'SAFE'){ statusCls='status-low'; statusTxt='SAFE MODE'; }
+    else if(j.reason.includes('HIGH')){ statusCls='status-high'; statusTxt='HIGH'; }
+    else if(j.reason.includes('LOW')){ statusCls='status-low'; statusTxt='LOW'; }
     statusBadge.textContent = 'BGL: ' + statusTxt;
     statusBadge.className = 'badge ' + statusCls;
 
     $('reasonLine').textContent = j.reason;
     animateActivations(j.activations);
 
-    pushLog(`basal ${j.basal_rate.toFixed(2)} U/hr · ${j.mode}`,
-      j.mode === 'SAFE' ? 'd' : 't');
+    pushLog(`${j.delivery_rate.toFixed(2)} U/hr (${j.microbolus_units.toFixed(2)}U) · ${j.mode}`,
+      j.mode === 'SAFE' ? 'd' : j.mode === 'SUSPEND' ? 'a' : 't');
   }catch(e){
     $('connDot').className = 'dot bad';
     pushLog('send failed: ' + e.message, 'd');
@@ -469,17 +622,180 @@ async function sendDecision(){
 }
 $('sendBtn').onclick = sendDecision;
 
-// ---- live mode ----
+// ---- live mode (auto-send current manual slider values) ----
 let liveTimer = null;
 $('liveMode').onchange = (e) => {
   if(e.target.checked){
+    if($('autoSimMode').checked){ $('autoSimMode').checked = false; stopAutoSim(); }
     liveTimer = setInterval(sendDecision, 2000);
   } else {
     clearInterval(liveTimer);
   }
 };
 
+// ---- auto-simulate: generates a plausible next patient state each tick ----
+const sim = {
+  minutes: 7 * 60,        // fake clock starts at 07:00
+  bgl: 9.5,
+  bglVelocity: 0,         // momentum term — smooths tick-to-tick direction changes
+  mealRise: 0,            // decaying upward pull from carb absorption
+  insulinTail: 0,         // decaying downward pull from recent delivery (insulin action lingers)
+  hoursSinceBolus: 4,
+  exercise: { active: false, level: 'none', ticksLeft: 0 },
+  stress: { level: 'low', ticksLeft: 0 },
+  cyclePhase: 'follicular',
+  cycleTicksInPhase: 0,
+  lastDelivery: 0,
+};
+let simTimer = null;
+
+const CYCLE_ORDER = ['follicular', 'ovulation', 'luteal', 'menstrual'];
+const CYCLE_PHASE_DURATION_TICKS = 40; // compressed for demo purposes, not real cycle length
+
+function formatClock(totalMinutes){
+  const m = ((totalMinutes % 1440) + 1440) % 1440;
+  const hh = String(Math.floor(m / 60)).padStart(2, '0');
+  const mm = String(m % 60).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+function weightedChoice(options, weights){
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * total;
+  for(let i = 0; i < options.length; i++){
+    if(r < weights[i]) return options[i];
+    r -= weights[i];
+  }
+  return options[options.length - 1];
+}
+
+function simTick(){
+  sim.minutes += 5; // one control period, matches CONTROL_PERIOD_MIN
+
+  // --- meal event: occasional, resets time-since-bolus, adds a decaying
+  // upward pull released gradually over the next ~10-15 ticks (a rough
+  // carb-absorption curve) for the BGL simulation, AND fires a real
+  // one-time /carb-bolus call — carbs are never part of the recurring
+  // /decide payload anymore, matching carbBolus() being fully separate
+  // from the continuous correction loop.
+  if(Math.random() < 0.045){
+    const carbsAmt = [15, 30, 45, 60][Math.floor(Math.random() * 4)];
+    sim.mealRise += carbsAmt * 0.05;
+    sim.hoursSinceBolus = 0;
+    carbs.value = carbsAmt; carbs.oninput();
+    logMealBolus(carbsAmt);
+  } else {
+    sim.hoursSinceBolus = Math.min(6, sim.hoursSinceBolus + 5 / 60);
+  }
+
+  // --- exercise: session-based, not a per-tick coin flip. Once started,
+  // an exercise bout persists for several ticks before ending, like an
+  // actual workout, instead of flickering between states every 5 minutes.
+  if(sim.exercise.active){
+    sim.exercise.ticksLeft--;
+    if(sim.exercise.ticksLeft <= 0){
+      sim.exercise.active = false;
+      sim.exercise.level = 'none';
+      pushLog('exercise session ended', 't');
+    }
+  } else if(Math.random() < 0.035){
+    const level = weightedChoice(['light', 'moderate', 'high'], [0.5, 0.35, 0.15]);
+    const duration = level === 'light' ? 6 + Math.floor(Math.random() * 5)
+                    : level === 'moderate' ? 4 + Math.floor(Math.random() * 4)
+                    : 2 + Math.floor(Math.random() * 3);
+    sim.exercise = { active: true, level, ticksLeft: duration };
+    pushLog(`starting ${level} exercise (~${duration * 5}min)`, 't');
+  }
+
+  // --- stress: also session-based, longer and rarer episodes
+  if(sim.stress.ticksLeft > 0){
+    sim.stress.ticksLeft--;
+    if(sim.stress.ticksLeft === 0) sim.stress.level = 'low';
+  } else if(Math.random() < 0.02){
+    const level = weightedChoice(['medium', 'high'], [0.7, 0.3]);
+    const duration = level === 'medium' ? 12 + Math.floor(Math.random() * 12)
+                                         : 6 + Math.floor(Math.random() * 8);
+    sim.stress = { level, ticksLeft: duration };
+  }
+
+  // --- cycle phase: slow, deterministic forward progression through the
+  // real order (follicular -> ovulation -> luteal -> menstrual -> ...)
+  // rather than random jumps — compressed in time for demo purposes.
+  sim.cycleTicksInPhase++;
+  if(sim.cycleTicksInPhase >= CYCLE_PHASE_DURATION_TICKS){
+    const idx = CYCLE_ORDER.indexOf(sim.cyclePhase);
+    sim.cyclePhase = CYCLE_ORDER[(idx + 1) % CYCLE_ORDER.length];
+    sim.cycleTicksInPhase = 0;
+    pushLog(`cycle phase advanced to ${sim.cyclePhase}`, 't');
+  }
+
+  // --- BGL model: gentle mean-reversion + a smoothed insulin "tail"
+  // (delivered insulin keeps acting for a while, not just the instant
+  // it's given) + gradual meal release + exercise pulling it down while
+  // active + small noise, all blended through a momentum term so the
+  // curve drifts like a real CGM trace instead of jittering tick to tick.
+  const meanReversion = (bglRange.target - sim.bgl) * 0.02;
+  sim.insulinTail = sim.insulinTail * 0.85 + sim.lastDelivery * 0.02;
+  const exerciseEffect = sim.exercise.active
+    ? -({ light: 0.05, moderate: 0.09, high: 0.15 }[sim.exercise.level])
+    : 0;
+  const mealRelease = sim.mealRise * 0.16;
+  sim.mealRise *= 0.84;
+  const noise = (Math.random() - 0.5) * 0.08;
+
+  const delta = meanReversion - sim.insulinTail + exerciseEffect + mealRelease + noise;
+  sim.bglVelocity = sim.bglVelocity * 0.6 + delta * 0.4; // momentum smoothing
+  sim.bgl = Math.max(3.2, Math.min(21, sim.bgl + sim.bglVelocity));
+
+  const trend = Math.max(-3, Math.min(3, sim.bglVelocity * 3)); // ~per-15-min equivalent
+
+  // rare CGM dropout, just to show the SAFE branch during a demo
+  const cgmActive = Math.random() >= 0.012;
+
+  // write the generated state into the visible controls so the audience
+  // can watch them move, then reuse the normal send path
+  bgl.value = sim.bgl.toFixed(1);          bgl.oninput();
+  trend.value = trend.toFixed(1);          trend.oninput();
+  hours.value = sim.hoursSinceBolus.toFixed(2); hours.oninput();
+  $('exercise').value = sim.exercise.level;
+  $('stress').value = sim.stress.level;
+  $('cycle').value = sim.cyclePhase;
+  $('cgmActive').checked = cgmActive;
+
+  $('simClock').textContent = formatClock(sim.minutes);
+
+  sendDecision().then(() => {
+    // pick up whatever delivery rate actually got returned, if available,
+    // so next tick's insulin effect reflects what the controller decided
+    const num = parseFloat($('basalNum').textContent);
+    if(!isNaN(num)) sim.lastDelivery = num;
+  });
+}
+
+function startAutoSim(){
+  $('simClockWrap').style.display = 'flex';
+  const speed = parseInt($('simSpeed').value, 10);
+  simTick(); // fire one immediately so the demo doesn't sit idle
+  simTimer = setInterval(simTick, speed);
+}
+function stopAutoSim(){
+  clearInterval(simTimer);
+  $('simClockWrap').style.display = 'none';
+}
+$('autoSimMode').onchange = (e) => {
+  if(e.target.checked){
+    if($('liveMode').checked){ $('liveMode').checked = false; clearInterval(liveTimer); }
+    startAutoSim();
+  } else {
+    stopAutoSim();
+  }
+};
+$('simSpeed').onchange = () => {
+  if($('autoSimMode').checked){ clearInterval(simTimer); simTimer = setInterval(simTick, parseInt($('simSpeed').value, 10)); }
+};
+
 // try an initial connection check
+updateBglReferenceLines(); // draw default reference lines immediately, refined once connected
 testConnection();
 </script>
 </body>

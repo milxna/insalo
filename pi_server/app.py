@@ -1,3 +1,5 @@
+#always run: source venv/bin/activate
+
 """
 INSALO Flask demo server
 """
@@ -29,8 +31,7 @@ from neuralnetwork import (
 app = Flask(__name__)
 CORS(app)
 
-# connect=False: the demo server never talks to the Arduino.
-ctrl = INSALOController(connect=False)
+ctrl = INSALOController(connect=True) 
 
 WEIGHTS_FILE = os.path.join(
     os.path.dirname(__file__), "..", "scripts", "insalo_weights.json"

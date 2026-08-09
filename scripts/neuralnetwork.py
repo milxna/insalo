@@ -21,7 +21,7 @@ kDefaultDelivery    = _rate_low - kbglCorrectionGain * (kLowRefPoint - kTargetBG
 kMinDelivery     = 0.0    # U/h
 kDoseIncrement   = 0.05   # U
 kCGMValidMin = 6.1    # mmol/L - below this no more insulin is required so suspend
-kCGMValidMax = 25.0   # mmol/L - above this, treat the CGM reading as invalid    # mmol/L - below this no more insulin is required so suspend
+kCGMValidMax = 25.0  
 
 kCarbRatio = 4.5   # g of carbs covered by 1 U of insulin
 kMaxCarbBolus         = 10.0   # U - max carb bolus delivery
@@ -62,11 +62,11 @@ kStressMultipliers = {
 def encode(bgl, bglTrend, exercise, stress, cyclePhase,
            hoursSinceBolus=4.0):
 
-    bgl_error  = bgl - kTargetBGL
+    bgl_error  = bgl - kTargetBGL #NEW
     exercise_f = kExerciseMultipliers.get(exercise, 1.0)
     stress_f   = kStressMultipliers.get(stress, 1.0)
     cycle_f    = kCycleMultipliers.get(cyclePhase, 1.0)
-    iob        = max(0.0, 1.0 - hoursSinceBolus / 4.0)
+    iob        = max(0.0, 1.0 - hoursSinceBolus / 4.0) #NEW
 
     return [bgl, bgl_error, bglTrend, exercise_f, stress_f,
             cycle_f, iob]
@@ -101,33 +101,23 @@ def normaliseTarget(delivery):
 def denormaliseTarget(norm_delivery):
     return norm_delivery * (kMaxLimit - kMinDelivery) + kMinDelivery
 
+
+#delivery code
 def roundToIncrement(units, increment=kDoseIncrement):
-    """Rounds a dose to the nearest multiple of `increment` (default 0.05U).
-    This is what actually gets converted to motor steps - it guarantees the
-    dose you report is the dose you deliver, rather than whatever value
-    falls out of rounding the motor's step count."""
+
     return round(units / increment) * increment
 
 def deliveryToMicrobolus(deliveryRate):
-    """Converts a U/h delivery rate into the exact number of insulin units
-    (U) that will actually be delivered THIS control period (5 min).
-    This is the real dose - deliveryRate on its own is only an hourly
-    equivalent and is never injected as-is."""
     return deliveryRate * kControlPeriod
 
 def microbolusToSteps(microbolus_units):
-    """Converts an exact insulin-unit dose into motor steps."""
     return round(microbolus_units * kStepsPerUnit)
 
 def deliveryToSteps(deliveryRate):
-    """Convenience wrapper: U/h rate -> motor steps for one control period."""
     return microbolusToSteps(deliveryToMicrobolus(deliveryRate))
 
 
 def carbBolusUnits(carbs_g, insulin_to_carb_ratio=kCarbRatio):
-    """Computes a one time carb bolus dose (U), entirely separate from the
-    continuous 5-min correction in decide().
-    """
     if carbs_g <= 0:
         return 0.0
     units = carbs_g / insulin_to_carb_ratio
@@ -453,19 +443,16 @@ class INSALOController:
     def decide(self, bgl, bgl_trend=0.0, exercise='none', stress='low',
                cycle_phase='follicular',
                hours_since_bolus=4.0, cgm_active=True):
-        """
-        This is the continuous 5-minute correction loop only. Carbs handled separately.
-        """
 
         if not cgm_active:
             predicted = kSafeLimit
             mode      = 'SAFE'
-            reason    = 'CGM signal lost - holding safe fallback delivery'
+            reason    = 'CGM signal lost'
 
         elif bgl > kCGMValidMax:
             predicted = kSafeLimit
             mode      = 'SAFE'
-            reason    = 'BGL reading implausibly high - sensor error suspected'
+            reason    = 'Sensor error suspected'
 
         elif bgl <= kCGMValidMin:
             predicted = kMinDelivery
@@ -505,9 +492,6 @@ class INSALOController:
         }
 
     def carbBolus(self, carbs_g, carbRatio=kCarbRatio):
-        """
-        Just the one time carb bolus.
-        """
         units = carbBolusUnits(carbs_g, carbRatio)
         steps = microbolusToSteps(units)
 

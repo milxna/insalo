@@ -29,11 +29,7 @@ from neuralnetwork import (
 app = Flask(__name__)
 CORS(app)
 
-# --------------------------------------------------------------------------
-# 1. ENABLE HARDWARE CONNECTION
-# Set connect=True so the controller connects to your Arduino over Serial.
-# If your Arduino uses a different port, pass: arduino_port="/dev/ttyUSB0"
-# --------------------------------------------------------------------------
+#arduion set to false if running locally 
 ctrl = INSALOController(arduino_port="/dev/ttyACM0", connect=True)
 
 WEIGHTS_FILE = os.path.join(
@@ -74,10 +70,6 @@ def options():
 
 @app.route("/decide", methods=["POST"])
 def decide():
-    """
-    Continuous 5-minute correction loop only.
-    Carb intake is handled separately by /carb-bolus.
-    """
     data = request.get_json(force=True) or {}
 
     try:
@@ -100,9 +92,6 @@ def decide():
             cgm_active=cgm_active,
         )
 
-        # ------------------------------------------------------------------
-        # TRIGGER MOTOR COMMAND
-        # ------------------------------------------------------------------
         if result.get("steps", 0) > 0:
             print(f"[MOTOR] Sending {result['steps']} steps to Arduino...")
             ctrl.sendMotorCommand(result["steps"])
@@ -153,9 +142,6 @@ def carb_bolus():
         # Calculate bolus steps
         result = ctrl.carbBolus(carbs_g, carbRatio=ratio)
 
-        # ------------------------------------------------------------------
-        # TRIGGER MOTOR COMMAND
-        # ------------------------------------------------------------------
         if result.get("steps", 0) > 0:
             print(f"[MOTOR] Sending {result['steps']} steps for carb bolus...")
             ctrl.sendMotorCommand(result["steps"])
